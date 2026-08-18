@@ -23,6 +23,12 @@ var (
 	ErrInvalidArchive = errors.New("invalid engine archive")
 	// ErrLocalIO 表示 gdit 用户目录中的本地文件操作失败。
 	ErrLocalIO = errors.New("local I/O failure")
+	// ErrNotInstalled 表示目标版本尚未完整安装。
+	ErrNotInstalled = errors.New("version not installed")
+	// ErrNoDefault 表示未设置默认版本，或 current 链接悬空、指向的版本已不完整。
+	ErrNoDefault = errors.New("no default version set")
+	// ErrDefaultInUse 表示当前默认版本不能被删除。
+	ErrDefaultInUse = errors.New("cannot remove current default")
 )
 
 // SourceUnavailableError 标记来源的连接或资产暂时不可用，允许继续 fallback。
