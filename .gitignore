@@ -1,0 +1,41 @@
+# Go 构建与测试产物
+/bin/
+/build/
+/dist/
+/gdit
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.coverprofile
+*.prof
+/coverage/
+
+# Wails 与前端产物
+/gui/build/bin/
+/gui/frontend/node_modules/
+/gui/frontend/dist/
+/gui/frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 本地配置与缓存
+/.cache/
+/.env
+/.env.*
+!/.env.example
+*.log
+*.tmp
+
+# 编辑器与操作系统文件
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
