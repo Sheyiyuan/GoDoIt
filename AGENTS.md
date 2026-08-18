@@ -103,5 +103,5 @@ GoDoIt/
 - 使用 git flow 风格分支和约定式提交。
 - 不改动与当前任务无关的文件。
 
-当前设计状态为 `v0.2 第一阶段实施中`。第一阶段仅实现 Linux amd64 的 `install/list`；
+当前设计状态为 `v0.2 第二阶段实施中`。第二阶段为 `default/remove/setup/run`（见架构文档 §9.4）；
 GodotHub 和 AtomGit 的具体 URL 规则确认前，不把猜测地址写入内置 provider。

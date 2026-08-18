@@ -147,7 +147,7 @@ func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallR
 	}
 	var lastUnavailable error
 	for _, provider := range providers {
-		m.emit(ProgressEvent{Stage: "resolve", Source: provider.Name(), Filename: assetName})
+		m.emit(ProgressEvent{Stage: "resolve", Version: id, Source: provider.Name(), Filename: assetName})
 		artifact, resolveErr := provider.Resolve(ctx, requestForSource)
 		if resolveErr != nil {
 			if errors.Is(resolveErr, context.Canceled) || errors.Is(resolveErr, context.DeadlineExceeded) {
@@ -163,7 +163,7 @@ func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallR
 			return InstallResult{}, err
 		}
 		downloadPath := filepath.Join(operation, artifact.Filename)
-		downloadErr := m.download(ctx, artifact, downloadPath)
+		downloadErr := m.download(ctx, artifact, downloadPath, id)
 		if downloadErr != nil {
 			if errors.Is(downloadErr, context.Canceled) || errors.Is(downloadErr, context.DeadlineExceeded) {
 				return InstallResult{}, downloadErr
@@ -236,7 +236,7 @@ func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallR
 		if stateChanged {
 			m.emit(ProgressEvent{Stage: "state", Source: provider.Name(), Message: "state index updated"})
 		}
-		m.emit(ProgressEvent{Stage: "complete", Source: provider.Name(), Filename: assetName})
+		m.emit(ProgressEvent{Stage: "complete", Version: id, Source: provider.Name(), Filename: assetName})
 		return result, nil
 	}
 	if lastUnavailable != nil {
@@ -461,6 +461,173 @@ func compareVersions(left, right string) int {
 	return 0
 }
 
+// Default 返回当前默认版本 ID。未设置、链接悬空或指向的版本已不完整时返回 ErrNoDefault。
+// 只读，不获取锁。
+func (m *Manager) Default(ctx context.Context) (string, error) {
+	storeRoot := store.New(m.root)
+	id, err := storeRoot.ReadCurrent()
+	if err != nil {
+		if errors.Is(err, store.ErrNoCurrent) {
+			return "", ErrNoDefault
+		}
+		return "", localIOError("read current link", err)
+	}
+	records, err := storeRoot.ScanValid()
+	if err != nil {
+		return "", localIOError("scan installed versions", err)
+	}
+	if findRecord(records, id) == nil {
+		return "", ErrNoDefault
+	}
+	return id, nil
+}
+
+// SetDefault 把指定版本设为全局默认：拿全局修改锁，锁内校验目标已完整安装，
+// 然后原子替换 current symlink。替换前失败（未安装、锁内 I/O 错误）时旧链接
+// 保持不变；替换成功但父目录同步失败时新链接已生效，返回错误但状态不损坏。
+func (m *Manager) SetDefault(ctx context.Context, id string) error {
+	if !store.ValidID(id) {
+		return fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
+	}
+	if err := os.MkdirAll(m.root, 0o755); err != nil {
+		return localIOError("create store root", err)
+	}
+	storeRoot := store.New(m.root)
+	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
+	if err != nil {
+		return contextOrLocalIOError("acquire store lock", err)
+	}
+	defer guard.Close()
+	records, err := storeRoot.ScanValid()
+	if err != nil {
+		return localIOError("scan installed versions", err)
+	}
+	if findRecord(records, id) == nil {
+		return fmt.Errorf("%w: %s", ErrNotInstalled, id)
+	}
+	if err := storeRoot.SetCurrent(id); err != nil {
+		return localIOError("set default version", err)
+	}
+	return nil
+}
+
+// Remove 卸载指定版本：拿全局修改锁，删除版本目录后重扫并原子重建 state.toml。
+// 当前默认版本拒绝删除；删除运行中版本的目录不会终止已启动的引擎进程。
+// 版本目录删除成功后，状态索引重建失败不误报删除失败：索引是派生数据，
+// 下次读取会按 versions/ 自动重建，通过进度警告告知。
+func (m *Manager) Remove(ctx context.Context, id string) error {
+	if !store.ValidID(id) {
+		return fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
+	}
+	if err := os.MkdirAll(m.root, 0o755); err != nil {
+		return localIOError("create store root", err)
+	}
+	storeRoot := store.New(m.root)
+	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
+	if err != nil {
+		return contextOrLocalIOError("acquire store lock", err)
+	}
+	defer guard.Close()
+	records, err := storeRoot.ScanValid()
+	if err != nil {
+		return localIOError("scan installed versions", err)
+	}
+	record := findRecord(records, id)
+	if record == nil {
+		return fmt.Errorf("%w: %s", ErrNotInstalled, id)
+	}
+	current, currentErr := storeRoot.ReadCurrent()
+	if currentErr == nil && current == id {
+		return fmt.Errorf("%w: %s", ErrDefaultInUse, id)
+	}
+	if currentErr != nil && !errors.Is(currentErr, store.ErrNoCurrent) {
+		return localIOError("read current link", currentErr)
+	}
+	if err := os.RemoveAll(record.Dir); err != nil {
+		return localIOError("remove version directory", err)
+	}
+	records, err = storeRoot.ScanValid()
+	if err != nil {
+		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
+		return nil
+	}
+	if _, err := storeRoot.ReconcileState(records); err != nil {
+		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
+		return nil
+	}
+	return nil
+}
+
+// Setup 幂等创建或修复 ~/.gdit/bin/godot shim：它是指向 gdit 自身的 symlink。
+// 已存在且指向正确时不做任何事；指向错误或缺失时原子修复。不修改 shell 配置
+// 或系统 PATH。
+func (m *Manager) Setup(ctx context.Context) error {
+	if err := os.MkdirAll(m.root, 0o755); err != nil {
+		return localIOError("create store root", err)
+	}
+	storeRoot := store.New(m.root)
+	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
+	if err != nil {
+		return contextOrLocalIOError("acquire store lock", err)
+	}
+	defer guard.Close()
+	executable, err := os.Executable()
+	if err != nil {
+		return localIOError("resolve gdit executable", err)
+	}
+	if err := storeRoot.EnsureShim(executable); err != nil {
+		return localIOError("create godot shim", err)
+	}
+	return nil
+}
+
+// ResolveLaunch 解析启动目标：id 为空时取当前默认版本（未设置、链接悬空或指向的
+// 版本已不完整时均报 ErrNoDefault），否则校验指定版本已完整安装，返回引擎可执行
+// 文件的绝对路径。不做环境合并，不启动子进程。
+func (m *Manager) ResolveLaunch(ctx context.Context, id string) (LaunchTarget, error) {
+	storeRoot := store.New(m.root)
+	fromDefault := id == ""
+	if id == "" {
+		var err error
+		id, err = storeRoot.ReadCurrent()
+		if err != nil {
+			if errors.Is(err, store.ErrNoCurrent) {
+				return LaunchTarget{}, ErrNoDefault
+			}
+			return LaunchTarget{}, localIOError("read current link", err)
+		}
+	} else if !store.ValidID(id) {
+		return LaunchTarget{}, fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
+	}
+	records, err := storeRoot.ScanValid()
+	if err != nil {
+		return LaunchTarget{}, localIOError("scan installed versions", err)
+	}
+	record := findRecord(records, id)
+	if record == nil {
+		if fromDefault {
+			return LaunchTarget{}, ErrNoDefault
+		}
+		return LaunchTarget{}, fmt.Errorf("%w: %s", ErrNotInstalled, id)
+	}
+	return LaunchTarget{
+		ID:         record.Manifest.ID,
+		Version:    record.Manifest.Version,
+		Edition:    record.Manifest.Edition,
+		Executable: filepath.Join(record.Dir, "payload", record.Manifest.Launcher),
+	}, nil
+}
+
+// findRecord 在扫描结果中查找指定版本，未找到时返回 nil。
+func findRecord(records []store.Record, id string) *store.Record {
+	for index := range records {
+		if records[index].Manifest.ID == id {
+			return &records[index]
+		}
+	}
+	return nil
+}
+
 func (m *Manager) installSources() ([]Source, error) {
 	if len(m.sources) > 0 {
 		return append([]Source(nil), m.sources...), nil
@@ -515,7 +682,7 @@ func (a providerAdapter) Resolve(ctx context.Context, request SourceRequest) (Ar
 	}, nil
 }
 
-func (m *Manager) download(ctx context.Context, artifact Artifact, destination string) error {
+func (m *Manager) download(ctx context.Context, artifact Artifact, destination, versionID string) error {
 	parsed, err := validateDownloadURL(artifact.URL)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
@@ -568,7 +735,7 @@ func (m *Manager) download(ctx context.Context, artifact Artifact, destination s
 				return localIOError("write download file", err)
 			}
 			downloaded += int64(count)
-			m.emit(ProgressEvent{Stage: "download", Source: artifact.Source, Filename: artifact.Filename, BytesDownloaded: downloaded, TotalBytes: response.ContentLength})
+			m.emit(ProgressEvent{Stage: "download", Version: versionID, Source: artifact.Source, Filename: artifact.Filename, BytesDownloaded: downloaded, TotalBytes: response.ContentLength})
 		}
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
@@ -597,19 +764,8 @@ func (m *Manager) download(ctx context.Context, artifact Artifact, destination s
 
 func normalizeRequest(request InstallRequest) (string, string, error) {
 	version := strings.TrimSpace(request.Version)
-	parts := strings.Split(version, ".")
-	if len(parts) != 3 || version == "" {
-		return "", "", fmt.Errorf("%w: version must be MAJOR.MINOR.PATCH", ErrInvalidInput)
-	}
-	for _, part := range parts {
-		if part == "" {
-			return "", "", fmt.Errorf("%w: version must contain three numeric fields", ErrInvalidInput)
-		}
-		for _, character := range part {
-			if character < '0' || character > '9' {
-				return "", "", fmt.Errorf("%w: version must contain only digits", ErrInvalidInput)
-			}
-		}
+	if err := validateVersion(version); err != nil {
+		return "", "", err
 	}
 	edition := strings.ToLower(strings.TrimSpace(request.Edition))
 	if edition == "" {
@@ -620,6 +776,50 @@ func normalizeRequest(request InstallRequest) (string, string, error) {
 	}
 	if edition != "standard" && edition != "dotnet" {
 		return "", "", fmt.Errorf("%w: edition must be standard or dotnet", ErrInvalidInput)
+	}
+	return version, edition, nil
+}
+
+// ValidateVersion 校验精确稳定版语法：三个十进制数字段，拒绝 latest、范围、
+// 预览版和任意后缀。CLI 的交互输入校验与 ParseVersionArg 复用同一实现。
+func ValidateVersion(version string) error {
+	return validateVersion(strings.TrimSpace(version))
+}
+
+// validateVersion 校验精确稳定版语法：三个十进制数字段，拒绝 latest、范围、预览版和任意后缀。
+func validateVersion(version string) error {
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 || version == "" {
+		return fmt.Errorf("%w: version must be MAJOR.MINOR.PATCH", ErrInvalidInput)
+	}
+	for _, part := range parts {
+		if part == "" {
+			return fmt.Errorf("%w: version must contain three numeric fields", ErrInvalidInput)
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return fmt.Errorf("%w: version must contain only digits", ErrInvalidInput)
+			}
+		}
+	}
+	return nil
+}
+
+// ParseVersionArg 解析 CLI 的版本参数，支持 m 前缀简写（仅小写）：
+// "m4.5.2" 等价于 edition 为 dotnet 的 "4.5.2"；无前缀时 edition 为 standard。
+// m 前缀与 --edition 同时出现属于用法错误，由 CLI 层检查；m 后不是合法三段
+// 版本号时返回与普通版本输入相同的语法错误。
+func ParseVersionArg(arg string) (version, edition string, err error) {
+	trimmed := strings.TrimSpace(arg)
+	if strings.HasPrefix(trimmed, "m") {
+		version = trimmed[1:]
+		edition = "dotnet"
+	} else {
+		version = trimmed
+		edition = "standard"
+	}
+	if err := validateVersion(version); err != nil {
+		return "", "", err
 	}
 	return version, edition, nil
 }
