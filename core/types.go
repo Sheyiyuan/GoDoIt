@@ -66,6 +66,7 @@ type Source interface {
 // ProgressEvent 描述安装过程中可展示给 CLI 或 GUI 的进度。
 type ProgressEvent struct {
 	Stage           string `json:"stage"`
+	Version         string `json:"version,omitempty"` // 版本 ID，如 4.5.1-dotnet；resolve/download/complete 事件必填
 	Source          string `json:"source,omitempty"`
 	Filename        string `json:"filename,omitempty"`
 	BytesDownloaded int64  `json:"bytes_downloaded,omitempty"`
@@ -90,4 +91,12 @@ type InstalledVersion struct {
 type InstallResult struct {
 	Version              InstalledVersion `json:"version"`
 	StateRebuildRequired bool             `json:"state_rebuild_required"`
+}
+
+// LaunchTarget 描述 ResolveLaunch 解析出的引擎启动目标。
+type LaunchTarget struct {
+	ID         string `json:"id"`
+	Version    string `json:"version"`
+	Edition    string `json:"edition"`
+	Executable string `json:"executable"` // 引擎可执行文件的绝对路径
 }

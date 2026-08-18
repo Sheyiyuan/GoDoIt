@@ -28,14 +28,38 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
-func TestPadLabelPadsAndTruncates(t *testing.T) {
-	if got := padLabel("github"); got != "github        " {
-		t.Fatalf("unexpected padding: %q", got)
+func TestProgressLabelCombinesVersionAndSource(t *testing.T) {
+	if got := progressLabel(gdit.ProgressEvent{Version: "4.5.1-dotnet", Source: "godothub"}); got != "4.5.1-dotnet(godothub)" {
+		t.Fatalf("unexpected label: %q", got)
 	}
-	long := "a-very-long-custom-source-name"
-	got := padLabel(long)
-	if len([]rune(got)) != labelWidth {
-		t.Fatalf("expected label width %d, got %d: %q", labelWidth, len([]rune(got)), got)
+	if got := progressLabel(gdit.ProgressEvent{Source: "github"}); got != "github" {
+		t.Fatalf("label without version must fall back to source: %q", got)
+	}
+}
+
+func TestTTYRendererLabelsVersionAndSource(t *testing.T) {
+	var stderr bytes.Buffer
+	renderer := newProgressRenderer(&stderr)
+	renderer.terminal = true
+	renderer.noColor = true
+	renderer.render(gdit.ProgressEvent{Stage: "resolve", Version: "4.5.1-dotnet", Source: "godothub", Filename: "a.zip"})
+	renderer.render(gdit.ProgressEvent{Stage: "download", Version: "4.5.1-dotnet", Source: "godothub", Filename: "a.zip", BytesDownloaded: 10 * 1024 * 1024, TotalBytes: 20 * 1024 * 1024})
+	got := stderr.String()
+	if !strings.Contains(got, "trying 4.5.1-dotnet from godothub\n") {
+		t.Fatalf("resolve line must name the version: %q", got)
+	}
+	if !strings.Contains(got, "4.5.1-dotnet(godothub)") {
+		t.Fatalf("download label must combine version and source: %q", got)
+	}
+}
+
+func TestNonttyChunkLabelsVersion(t *testing.T) {
+	var stderr bytes.Buffer
+	renderer := newProgressRenderer(&stderr)
+	renderer.render(gdit.ProgressEvent{Stage: "download", Version: "4.5.1-dotnet", Source: "godothub", Filename: "a.zip", BytesDownloaded: 8 * 1024 * 1024, TotalBytes: 16 * 1024 * 1024})
+	got := stderr.String()
+	if !strings.Contains(got, "downloaded 4.5.1-dotnet 8 MB / 16 MB from godothub") {
+		t.Fatalf("nontty chunk must name the version: %q", got)
 	}
 }
 

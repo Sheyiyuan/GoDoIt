@@ -28,21 +28,20 @@ const (
 	defaultTerminalWidth = 80
 	minDashWidth         = 10
 	maxDashWidth         = 60
-	labelWidth           = 14
 )
 
 // progressRenderer 负责下载进度在 stderr 上的渲染。
 // TTY 下用 \r 行内重绘破折号线（已下载品牌色、未下载灰色），非 TTY 下按 8 MiB 打点。
 type progressRenderer struct {
-	stderr     io.Writer
-	terminal   bool
-	noColor    bool
-	barColor   string
-	lastDraw   time.Time
-	lastBytes  int64
-	lastTotal  int64
-	lastSource string
-	lastChunk  map[string]int64
+	stderr    io.Writer
+	terminal  bool
+	noColor   bool
+	barColor  string
+	lastDraw  time.Time
+	lastBytes int64
+	lastTotal int64
+	lastLabel string
+	lastChunk map[string]int64
 }
 
 // newProgressRenderer 创建进度渲染器，TTY 检测与 NO_COLOR 在创建时确定。
@@ -71,11 +70,25 @@ func supportsTrueColor() bool {
 	return strings.Contains(value, "truecolor") || strings.Contains(value, "24bit")
 }
 
+// defaultLine 渲染 list 输出中的默认版本行：stdout 是 TTY 且未设置 NO_COLOR 时
+// 整行用品牌色高亮（truecolor 不支持时回退绿色），否则保持纯文本，保证管道和
+// 重定向场景下 stdout 仍然机器可读。
+func defaultLine(text string) string {
+	if os.Getenv("NO_COLOR") != "" || !stdoutIsTTY() {
+		return text
+	}
+	return pickBarColor() + text + ansiReset
+}
+
 // render 处理 ProgressEvent，把进度渲染到 stderr。
 func (r *progressRenderer) render(event gdit.ProgressEvent) {
 	switch event.Stage {
 	case "resolve":
-		fmt.Fprintf(r.stderr, "trying source %s\n", event.Source)
+		if event.Version != "" {
+			fmt.Fprintf(r.stderr, "trying %s from %s\n", event.Version, event.Source)
+		} else {
+			fmt.Fprintf(r.stderr, "trying source %s\n", event.Source)
+		}
 	case "download":
 		if r.terminal {
 			r.renderBar(event)
@@ -90,8 +103,13 @@ func (r *progressRenderer) render(event gdit.ProgressEvent) {
 			if r.lastTotal > 0 {
 				downloaded = r.lastTotal
 			}
+			// 无 download 样本（如零字节资产）时用事件字段兜底构造标签。
+			label := r.lastLabel
+			if label == "" {
+				label = progressLabel(event)
+			}
 			text := r.progressText(downloaded, r.lastTotal)
-			fmt.Fprintf(r.stderr, "%s  %s  %s\n", padLabel(r.lastSource), r.dashLine(1, r.dashWidth(r.lastSource, text)), text)
+			fmt.Fprintf(r.stderr, "%s  %s  %s\n", label, r.dashLine(1, r.dashWidth(label, text)), text)
 		}
 	case "warning":
 		r.clearLine()
@@ -112,17 +130,18 @@ func (r *progressRenderer) renderBar(event gdit.ProgressEvent) {
 			ratio = 1
 		}
 	}
+	label := progressLabel(event)
 	r.lastDraw = now
 	r.lastBytes = event.BytesDownloaded
 	r.lastTotal = event.TotalBytes
-	r.lastSource = event.Source
+	r.lastLabel = label
 	text := r.progressText(event.BytesDownloaded, event.TotalBytes)
-	fmt.Fprintf(r.stderr, "\r%s  %s  %s\x1b[K", padLabel(event.Source), r.dashLine(ratio, r.dashWidth(event.Source, text)), text)
+	fmt.Fprintf(r.stderr, "\r%s  %s  %s\x1b[K", label, r.dashLine(ratio, r.dashWidth(label, text)), text)
 }
 
 // renderChunk 在非 TTY 下按 8 MiB 打点。
 func (r *progressRenderer) renderChunk(event gdit.ProgressEvent) {
-	key := event.Source + "/" + event.Filename
+	key := progressLabel(event) + "/" + event.Filename
 	chunk := event.BytesDownloaded / progressNonttyChunk
 	if chunk > r.lastChunk[key] {
 		r.lastChunk[key] = chunk
@@ -130,7 +149,11 @@ func (r *progressRenderer) renderChunk(event gdit.ProgressEvent) {
 		if event.TotalBytes > 0 {
 			progress += fmt.Sprintf(" / %d MB", event.TotalBytes/(1024*1024))
 		}
-		fmt.Fprintf(r.stderr, "downloaded %s from %s\n", progress, event.Source)
+		if event.Version != "" {
+			fmt.Fprintf(r.stderr, "downloaded %s %s from %s\n", event.Version, progress, event.Source)
+		} else {
+			fmt.Fprintf(r.stderr, "downloaded %s from %s\n", progress, event.Source)
+		}
 	}
 }
 
@@ -143,12 +166,12 @@ func (r *progressRenderer) clearLine() {
 }
 
 // dashWidth 计算破折号线宽度：终端宽度减去标签、数字和间距的固定开销。
-func (r *progressRenderer) dashWidth(source, text string) int {
+func (r *progressRenderer) dashWidth(label, text string) int {
 	width := defaultTerminalWidth
 	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && w > 0 {
 		width = w
 	}
-	result := width - len(padLabel(source)) - len(text) - 4
+	result := width - len(label) - len(text) - 4
 	if result < minDashWidth {
 		return minDashWidth
 	}
@@ -203,13 +226,13 @@ func formatBytes(bytes int64) string {
 	}
 }
 
-// padLabel 把来源名左对齐补到固定宽度，超长截断。
-func padLabel(name string) string {
-	runes := []rune(name)
-	if len(runes) > labelWidth-2 {
-		runes = append(runes[:labelWidth-3], '…')
+// progressLabel 生成进度行的标签：版本 ID 与来源的组合（如 4.5.1-dotnet(godothub)），
+// 让批量安装时能区分正在下载的版本；事件不带版本 ID 时退回来源名。
+func progressLabel(event gdit.ProgressEvent) string {
+	if event.Version != "" {
+		return event.Version + "(" + event.Source + ")"
 	}
-	return string(runes) + strings.Repeat(" ", labelWidth-len(runes))
+	return event.Source
 }
 
 // progressWriter 返回渲染 ProgressEvent 的闭包（兼容旧调用方式）。

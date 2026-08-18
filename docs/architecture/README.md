@@ -1,12 +1,16 @@
 # GoDoIt 架构设计
 
-> 状态为 v0.2 第一阶段实施中  
+> 状态为 v0.2 第二阶段实施中（default/remove/setup/run）  
 > 本文档是 GoDoIt 的唯一架构真理源。
 
 第一阶段的产品边界、摘要信任模型、Go module 路径和 Linux amd64 支持范围已经确认，可以实施
 `install/list` 纵向切片。2026-08-17 实测确认 GodotHub 和 Godot 官方的 URL 规则并写入内置 provider；
 AtomGit 作为独立来源的规则尚未确认，确认前仍只实现 provider 契约、自定义来源和固定 fixture，
 不把猜测地址写入内置 provider。
+
+第二阶段为 `default/remove/setup/run`（见 §9.4）：`default` 取代原计划的 `use` 命名，语义为设置
+全局默认版本；`run` 取代原 FR-11 的 `exec` 设计。第二阶段不包含环境注入与 .NET SDK 选择
+（第三阶段），shim/run 只负责「读 current → 解析引擎 → 启动」。
 
 ## 1. 边界
 
@@ -80,6 +84,11 @@ gdit list
 `--edition` 默认是 `standard`，输入 `mono` 时归一化为 `dotnet`。版本解析只接受三个十进制数字段，
 拒绝 `latest`、版本范围、预览版和带任意后缀的输入。core 在任何路径拼接之前完成解析和规范化。
 
+第二阶段的简写输入形式（`m` 前缀，仅小写）：`m<版本>` 等价于 `--edition mono <版本>`，
+归一化后仍为 `dotnet` edition。版本号以数字开头，`m` 前缀无歧义。`m` 前缀与 `--edition`
+同时出现时报用法错误；`m` 后不是合法三段版本号时走现有版本语法错误。该糖在版本解析层
+实现，install/remove/default/run 四个命令统一生效。
+
 第一阶段只承诺 Linux amd64 的完整安装流程。MVP 仍需完成 Linux 的正式支持和 macOS Apple Silicon
 实机验证。Linux arm64 是否列入 MVP 需要在 review 时明确，不能仅凭上游存在对应资产就视为已支持。
 
@@ -113,7 +122,7 @@ gdit list
 即表示安装完成。若随后更新 `state.toml` 失败，本次安装仍返回“已安装但状态索引待重建”的结果，
 下次读取时按版本目录重建。CLI 需要把这个结果明确写到 stderr，不能把版本误报为未安装。
 
-`.lock` 覆盖 install、remove、use、setup、source use 的配置写回以及会落盘的状态重建。
+`.lock` 覆盖 install、remove、default、setup、source use 的配置写回以及会落盘的状态重建。
 等待锁时响应 context 取消。
 读取操作先扫描有效版本目录；发现 `state.toml` 不一致时，在取得锁并二次扫描后再原子重写，避免用
 过期快照覆盖另一个进程刚完成的安装。
@@ -124,21 +133,33 @@ gdit list
 所有 TOML 状态文件都写入同目录临时文件，完成编码、flush、文件同步和 close 后再 rename，随后同步
 父目录。版本目录发布和 current 切换也同步对应父目录。相关系统调用由 platform 适配层封装。
 
-### 4.2 切换
+CLI 的 `install` 接受多个版本参数（如 `gdit install 4.5.2 m4.6.2`），逐个串行执行上述完整流程：
+每个版本独立解析（`m` 前缀可混用）、独立 fallback 与校验，任一失败不中断其余，退出码按是否有
+失败汇总。`--edition` 显式给出时统一应用于所有参数，与任何 `m` 前缀同时出现报用法错误。该编排
+只发生在 CLI 层，core 的 `Install` 接口与锁模型不变；并发下载不在本阶段范围（需先重构锁粒度与
+operation 清理归属，见 4.1 锁内清理假设）。
 
-`gdit use <id>` 检查目标已经完整安装，然后原子替换 `~/.gdit/current` symlink。失败时保留旧链接。
+### 4.2 默认版本
+
+`gdit default <id>` 检查目标已经完整安装，然后原子替换 `~/.gdit/current` symlink。失败时保留旧
+链接。`gdit default` 无参数时显示当前默认版本；未设置或链接悬空时报错并提示先安装或 setup。
+`default` 只接受已完整安装的版本，不触发隐式下载，也不做项目级自动切换。`gdit list` 对默认版本
+追加 `default` 标记，且该行整行用品牌色高亮：stdout 为 TTY 且未设置 `NO_COLOR` 时生效
+（truecolor 不支持时回退绿色），非 TTY 保持纯文本，保证管道和重定向场景下 stdout 仍机器可读。
 
 ### 4.3 启动
 
 `gdit setup` 在用户显式执行时创建或修复 `~/.gdit/bin/godot` shim，并在该目录未加入 PATH 时给出
-提示。它不修改 shell 配置或系统 PATH。以 `godot` 名称启动时，gdit 只做下面三件事。
+提示。它不修改 shell 配置或系统 PATH。以 `godot` 名称启动时，gdit 进入 shim 路径：读取
+`~/.gdit/current`，解析引擎启动文件，execve 替换自身进程启动真实 Godot，透传参数、stdio 和退出码。
 
-1. 读取 `~/.gdit/current`。
-2. 从 `config.toml` 合并全局和当前版本环境。
-3. 启动真实 Godot，并透传参数和退出码。
+`gdit run` 提供三种启动方式：`-d` 启动默认版本；`<版本>` 显式启动指定版本（不改变默认）；
+无参数且终端可用时交互选择已安装版本后启动。`--` 之后的参数原样透传给引擎。
 
-shim 不读取当前项目，也不访问网络。必须经过 gdit 而不是直接 symlink 到引擎，因为环境变量需要
-只注入目标子进程。
+第二阶段 shim/run 只做「读 current → 解析引擎 → 启动」，不从 `config.toml` 合并环境，环境注入
+属于第三阶段（FR-04）。dotnet 版启动缺 SDK 时由引擎自行报错，CLI 输出不暗示 C# 已可完整启动。
+shim 不读取当前项目，也不访问网络。必须经过 gdit 而不是直接 symlink 到引擎，因为环境变量
+（第三阶段起）需要只注入目标子进程。
 
 ### 4.4 项目建议
 
@@ -395,6 +416,11 @@ func (m *Manager) Sources(ctx context.Context) ([]SourceInfo, error)
 func (m *Manager) SetDefaultSource(ctx context.Context, name string) error
 func (m *Manager) SetSourceDisabled(ctx context.Context, name string, disabled bool) error
 func (m *Manager) Available(ctx context.Context, sourceName string) ([]AvailableVersion, error)
+func (m *Manager) Default(ctx context.Context) (string, error)
+func (m *Manager) SetDefault(ctx context.Context, id string) error
+func (m *Manager) Remove(ctx context.Context, id string) error
+func (m *Manager) Setup(ctx context.Context) error
+func (m *Manager) ResolveLaunch(ctx context.Context, version string) (LaunchTarget, error)
 ```
 
 最终字段名可以在编码前做一次 Go 命名校正，行为约束保持不变。`RootDir` 必填，`HTTPClient` 为空时使用
@@ -414,6 +440,12 @@ Wails 事件。
 读写 `disabled_sources`。`Install` 指定被禁用的来源时报配置错误。`Available` 只读网络枚举，
 不落盘不拿锁；sourceName 为空时按 source_order 合并全部启用且支持枚举的来源，非空时只用指定
 来源（被禁用的来源报配置错误）。
+
+第二阶段新增：`Default` 读取 current symlink，未设置或悬空时返回可识别错误；`SetDefault` 获取
+全局修改锁、锁内校验目标已完整安装后原子替换 symlink；`Remove` 获取锁、删除版本目录并原子重建
+state.toml，当前默认版本返回可识别错误；`Setup` 幂等创建或修复 shim，不修改 shell 配置或系统
+PATH；`ResolveLaunch` 解析启动目标（版本 ID 为空时取当前默认），校验完整安装后返回引擎可执行
+文件绝对路径，不做环境合并。启动子进程本身（execve 或 spawn）在 CLI 层，core 不持有子进程。
 
 ### 7.2 依赖方向
 
@@ -439,9 +471,11 @@ review 确认），仅限 CLI 层使用，survey 类型不得进入 core，交�
 ## 8. 测试策略
 
 - 安装成功、下载中断、摘要失败、多源 fallback 和状态清单重建。
-- `use` 原子切换以及失败后旧 current 保持不变。
-- `setup` 创建 shim 但不修改 shell 配置或系统 PATH。
-- shim 使用 current、注入环境并透传退出码；缺少兼容 SDK 时不访问网络。
+- `default` 原子切换以及失败后旧 current 保持不变；未设置或链接悬空时报错。
+- `remove` 删除版本目录后 list 不再出现、state 原子重建；当前默认版本拒绝删除；
+  删除运行中的版本不影响已启动的引擎进程。
+- `setup` 创建 shim 但不修改 shell 配置或系统 PATH；幂等，重复执行不报错不重复创建。
+- shim/`run -d` 使用 current、透传参数与退出码；无 current 时报错不启动；不读取项目目录。
 - 标准版与 .NET 版不会互相覆盖。
 - 系统 SDK 与托管 SDK 的选择。
 - `suggest` 不修改项目目录或当前版本。
@@ -455,7 +489,11 @@ review 确认），仅限 CLI 层使用，survey 类型不得进入 core，交�
   错误，不进入交互流程。
 - CLI 进度渲染：TTY 下 `\r` 行内重绘破折号线（已下载段品牌色 #3A73B0，即 Go/Godot/C# 三色
   平均；终端不支持 truecolor 时回退绿色；未下载段灰色；`NO_COLOR` 时无色），100ms 节流、
-  完成/警告前清行；非 TTY 下按 8 MiB 打点。
+  完成/警告前清行；非 TTY 下按 8 MiB 打点。进度标签为「版本ID(来源)」（如
+  `4.5.1-dotnet(godothub)`），批量安装时能区分正在下载的版本；`ProgressEvent` 的
+  resolve/download/complete 事件必须携带版本 ID。survey 交互提示（install/run 选择、
+  remove 确认）一律渲染到 stderr，stdout 只输出结果；TTY/着色判定在 CLI 层参数化，
+  不依赖测试环境的真实终端。
 - Linux 与 macOS 的路径、资产名称和环境差异。
 
 所有测试显式传入 `t.TempDir()` 下的 gdit 根目录。source 测试使用内存 `http.RoundTripper` 或
@@ -485,7 +523,7 @@ TODO handler 和只为编译通过的 GUI 占位。
 6. 实现 core `Install` 与 `List`，随后接入薄 CLI。
 7. 完成单元测试、core 集成测试和 CLI 集成测试，再做一次不替代 fixture 的 Linux amd64 手工安装。
 
-第一阶段不包含 remove、use、shim、环境注入、.NET SDK 选择、doctor、suggest、模板管理和 GUI。
+第一阶段不包含 remove、default、shim、环境注入、.NET SDK 选择、doctor、suggest、模板管理和 GUI。
 `dotnet` edition 的引擎资产可以安装和列出，但兼容 SDK 检测及启动要到“环境与 .NET”阶段完成；CLI
 必须在输出中避免暗示这一阶段已经能完整启动 C# 项目。
 
@@ -506,8 +544,8 @@ TODO handler 和只为编译通过的 GUI 占位。
 不改变以下阶段顺序。
 
 ```text
-第一阶段  install/list
-第二阶段  remove + use/setup/shim
+第一阶段  install/list（含来源管理扩展）
+第二阶段  remove + default/setup/shim + run
 第三阶段  环境注入 + .NET SDK
 第四阶段  doctor
 第五阶段  suggest + 导出模板
@@ -515,6 +553,49 @@ TODO handler 和只为编译通过的 GUI 占位。
 ```
 
 remove 放到第二阶段，与 current 的引用约束一起实现，避免第一阶段先产生一套随后要改的删除语义。
+
+### 9.4 第二阶段：remove + default/setup/shim + run
+
+第二阶段在 Linux amd64 上交付 remove、default、setup/shim 和 run。环境注入（FR-04）与 .NET SDK
+选择（FR-05）仍属于第三阶段；本阶段 shim/run 只做「读 current → 解析引擎 → 启动」，dotnet 版
+启动缺 SDK 时由引擎自行报错。
+
+```text
+gdit default                   # 显示当前默认版本；未设置或悬空时报错
+gdit default <版本>            # 设为全局默认：原子替换 current symlink
+gdit remove <版本>             # 卸载；当前默认版本拒绝删除
+gdit setup                     # 创建/修复 ~/.gdit/bin/godot shim
+gdit run -d [-- 参数]          # 启动默认版本（等价于裸 godot）
+gdit run <版本> [-- 参数]      # 显式启动指定版本，不改变默认
+gdit run                       # TTY 下交互选择已安装版本后启动
+```
+
+命令简写：`default`→`d`、`run`→`r`、`remove`→`rm`、`setup`→`st`，与第一阶段 `i/l/s/a` 不冲突。
+版本输入统一支持 `m` 前缀（见 §3）：`gdit run m4.6.2` 等价于 `gdit run --edition dotnet 4.6.2`，
+install/remove/default 同样生效。
+
+- `default` 语义：设置全局默认 = 拿全局修改锁、锁内校验目标已完整安装、原子替换 current symlink，
+  失败保留旧链接。无参数时显示当前默认，未设置或悬空时报错并提示。default 只接受已完整安装的
+  版本，不触发隐式下载，对所有目录一致。
+- `remove` 语义：删除不可逆，默认需要确认——TTY 下 survey 确认（默认否），非 TTY 下必须显式
+  `-y`/`--yes` 跳过确认，避免脚本卡死或误删。确认后拿锁删除版本目录，随后重扫并原子重建
+  state.toml（复用第一阶段重建流程）。当前默认版本不能直接删除，必须先 `default` 到其他版本。
+  删除运行中版本的目录不终止已启动的引擎进程（POSIX inode 语义），gdit 只保证 current 不悬空；
+  `run <版本>` 指定的是已不存在的版本时报错。
+- `setup` 语义：幂等创建/修复 `~/.gdit/bin/godot`，它是指向 gdit 自身的 symlink；已存在且指向
+  正确的 gdit 时什么都不做，指向错误或缺失时修复。bin 目录不在 PATH 时输出提示。setup 不修改
+  shell 配置或系统 PATH。
+- `run` 语义：
+  - `-d`：解析 current → 启动引擎，等价于裸 `godot`。
+  - `<版本>`：校验已完整安装后启动，不改变 current。
+  - 无参数：仅 TTY 可用，survey 列出已安装版本（标记当前默认）选择后启动；非 TTY 返回用法错误。
+  - `--` 之后的参数、stdin/stdout/stderr 和退出码原样透传。
+- shim 路径：gdit 以 `godot` 名称启动（argv[0] basename 判断）时进入 shim 分支，解析后
+  execve 替换自身进程，信号、stdio 和退出码天然透传。`run` 的指定版本与交互路径由 CLI 层
+  spawn 启动。core 只提供 `ResolveLaunch` 解析启动目标，不启动子进程。
+- 交互选择器复用 survey/v2，只出现在 CLI 层；交互逻辑不影响 `-d` 与显式版本路径。
+- `run` 取代原 FR-11 的 `exec` 设计：本阶段即交付 headless 运行与参数透传能力，PRD 中
+  FR-11 并入 FR-02。
 
 ## 10. Review 结论
 
