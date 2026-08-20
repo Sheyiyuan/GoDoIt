@@ -1,4 +1,4 @@
-// Package config 负责读取用户级 TOML 配置，并校验第一阶段安装所需字段。
+// Package config 负责读取和原子写回用户级 TOML 配置。
 package config
 
 import (
@@ -16,6 +16,13 @@ const defaultSchemaVersion = 1
 
 // ErrSourceNotConfigured 表示来源名不在当前 source_order 中。
 var ErrSourceNotConfigured = errors.New("source is not configured")
+
+const (
+	// DisplayDriverKey 是显示驱动控制键。
+	DisplayDriverKey = "display_driver"
+	// InputMethodKey 是输入法控制键。
+	InputMethodKey = "input_method"
+)
 
 // SourceEntry 描述配置中的一个来源。
 type SourceEntry struct {
@@ -87,6 +94,58 @@ func SetSourceDisabled(root, name string, disabled bool) error {
 	return writeConfig(root, cfg)
 }
 
+// SetEnvironmentVariable 设置或删除全局环境变量并原子写回配置。
+// remove 为 true 时忽略 value；重复设置和删除均幂等。
+func SetEnvironmentVariable(root, key, value string, remove bool) error {
+	var validateErr error
+	if remove {
+		validateErr = ValidateEnvironmentKey(key)
+	} else {
+		validateErr = ValidateEnvironmentVariable(key, value)
+	}
+	if validateErr != nil {
+		return validateErr
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		return err
+	}
+	if cfg.Environment == nil {
+		cfg.Environment = defaultEnvironment()
+	}
+	if remove {
+		delete(cfg.Environment, key)
+	} else {
+		cfg.Environment[key] = value
+	}
+	return writeConfig(root, cfg)
+}
+
+// ValidateEnvironmentKey 校验环境键名可安全传给 execve。
+func ValidateEnvironmentKey(key string) error {
+	if key == "" || strings.ContainsAny(key, "=\x00") {
+		return errors.New("environment key must not be empty or contain '=' or NUL")
+	}
+	return nil
+}
+
+// ValidateEnvironmentVariable 校验环境键值可安全传给 execve。
+func ValidateEnvironmentVariable(key, value string) error {
+	if err := ValidateEnvironmentKey(key); err != nil {
+		return err
+	}
+	if strings.ContainsRune(value, '\x00') {
+		return errors.New("environment value must not contain NUL")
+	}
+	if key == DisplayDriverKey && value != "auto" && value != "x11" && value != "wayland" {
+		return errors.New("display_driver must be auto, x11 or wayland")
+	}
+	if key == InputMethodKey && value != "auto" && value != "fcitx" && value != "off" {
+		return errors.New("input_method must be auto, fcitx or off")
+	}
+	return nil
+}
+
 // IsSourceDisabled 返回指定来源是否在禁用名单中。
 func IsSourceDisabled(cfg File, name string) bool {
 	for _, item := range cfg.DisabledSources {
@@ -129,11 +188,34 @@ func writeConfig(root string, cfg File) error {
 	} else {
 		delete(configMap, "custom_sources")
 	}
+	if _, existed := configMap["environment"]; existed || !isDefaultEnvironment(cfg.Environment) {
+		// 原文件已有 environment 表或用户设置了非默认值时才写回，避免任意写回
+		// （如 source use/ban）把默认控制键物化进旧配置。
+		configMap["environment"] = cfg.Environment
+	} else {
+		delete(configMap, "environment")
+	}
 	var builder strings.Builder
 	if err := toml.NewEncoder(&builder).Encode(configMap); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
 	return writeFileAtomic(path, builder.String())
+}
+
+// isDefaultEnvironment 报告环境 map 是否恰好等于默认控制键（display_driver/input_method 均为 auto）。
+func isDefaultEnvironment(environment map[string]string) bool {
+	if len(environment) != 2 {
+		return false
+	}
+	for key, value := range environment {
+		if key != DisplayDriverKey && key != InputMethodKey {
+			return false
+		}
+		if value != "auto" {
+			return false
+		}
+	}
+	return true
 }
 
 // mergeCustomSources 逐条把 struct 已知字段覆盖进原配置 map 的 custom_sources 条目，
@@ -223,12 +305,13 @@ func syncDirectory(path string) error {
 	return unix.Fsync(fd)
 }
 
-// File 是 ~/.gdit/config.toml 的第一阶段结构。
+// File 是 ~/.gdit/config.toml 的结构。
 type File struct {
-	SchemaVersion   int            `toml:"schema_version"`
-	SourceOrder     []string       `toml:"source_order"`
-	DisabledSources []string       `toml:"disabled_sources"`
-	CustomSources   []CustomSource `toml:"custom_sources"`
+	SchemaVersion   int               `toml:"schema_version"`
+	SourceOrder     []string          `toml:"source_order"`
+	DisabledSources []string          `toml:"disabled_sources"`
+	CustomSources   []CustomSource    `toml:"custom_sources"`
+	Environment     map[string]string `toml:"environment"`
 }
 
 // CustomSource 描述一个与 Godot 资产 URL 兼容的自定义镜像。
@@ -245,7 +328,12 @@ func Default() File {
 	return File{
 		SchemaVersion: defaultSchemaVersion,
 		SourceOrder:   []string{"godothub", "github"},
+		Environment:   defaultEnvironment(),
 	}
+}
+
+func defaultEnvironment() map[string]string {
+	return map[string]string{DisplayDriverKey: "auto", InputMethodKey: "auto"}
 }
 
 // Load 读取配置文件。文件不存在时返回默认配置。
@@ -268,6 +356,21 @@ func Load(root string) (File, error) {
 	}
 	if err := validateSources(cfg); err != nil {
 		return File{}, err
+	}
+	if cfg.Environment == nil {
+		cfg.Environment = defaultEnvironment()
+	} else {
+		if _, ok := cfg.Environment[DisplayDriverKey]; !ok {
+			cfg.Environment[DisplayDriverKey] = "auto"
+		}
+		if _, ok := cfg.Environment[InputMethodKey]; !ok {
+			cfg.Environment[InputMethodKey] = "auto"
+		}
+	}
+	for key, value := range cfg.Environment {
+		if err := ValidateEnvironmentVariable(key, value); err != nil {
+			return File{}, fmt.Errorf("invalid environment variable %q: %w", key, err)
+		}
 	}
 	return cfg, nil
 }

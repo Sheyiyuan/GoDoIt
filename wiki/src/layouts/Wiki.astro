@@ -1,0 +1,252 @@
+---
+// Wiki 布局提供文档树、移动端导航、正文和页内目录。
+import Base from './Base.astro';
+import { getCollection } from 'astro:content';
+import { ChevronDown } from '@lucide/astro';
+
+interface Heading {
+	depth: number;
+	slug: string;
+	text: string;
+}
+
+interface Props {
+	title: string;
+	description?: string;
+	active?: string;
+	headings?: Heading[];
+}
+
+const { title, description, active, headings = [] } = Astro.props;
+const sections = [
+	{ id: 'tutorials', label: '教程', hint: '从头走完一个过程', index: '01' },
+	{ id: 'how-to', label: '操作指南', hint: '解决眼前的具体问题', index: '02' },
+	{ id: 'reference', label: '参考', hint: '查命令和配置细节', index: '03' },
+	{ id: 'explanation', label: '解释', hint: '理解模型与设计取舍', index: '04' },
+] as const;
+
+const all = await getCollection('wiki');
+const bySection = (id: string) =>
+	all
+		.filter((entry) => entry.data.section === id)
+		.sort((a, b) => a.data.order - b.data.order);
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+---
+
+<Base title={title} description={description}>
+	<div class="mobile-doc-nav">
+		<details>
+				<summary>
+					<span>浏览全部文档</span>
+					<ChevronDown class="mobile-nav-icon" size={18} stroke-width={1.8} aria-hidden="true" />
+				</summary>
+			<div class="mobile-doc-panel">
+				<a class="overview-link" href="/wiki/">Wiki 总览</a>
+				{sections.map((section) => (
+					<div class="mobile-group">
+						<strong>{section.label}</strong>
+						{bySection(section.id).map((entry) => (
+							<a href={`/wiki/${entry.id}/`} aria-current={active === entry.id ? 'page' : undefined}>{entry.data.title}</a>
+						))}
+					</div>
+				))}
+			</div>
+		</details>
+	</div>
+	<div class="wiki-shell">
+		<aside class="doc-tree" aria-label="Wiki 导航">
+			<a class="tree-home" href="/wiki/" aria-current={!active ? 'page' : undefined}>Wiki 总览</a>
+			{sections.map((section) => (
+				<section class="tree-group">
+					<div class="tree-heading">
+						<span class="tree-index">{section.index}</span>
+						<div>
+							<h2>{section.label}</h2>
+							<p>{section.hint}</p>
+						</div>
+					</div>
+					<ul>
+						{bySection(section.id).map((entry) => (
+							<li>
+								<a href={`/wiki/${entry.id}/`} aria-current={active === entry.id ? 'page' : undefined}>{entry.data.title}</a>
+							</li>
+						))}
+					</ul>
+				</section>
+			))}
+		</aside>
+		<article class="doc-content" data-pagefind-body>
+			<slot />
+		</article>
+		{toc.length > 0 && (
+			<aside class="toc" aria-label="页内目录">
+				<p>本页内容</p>
+				<ol>
+					{toc.map((heading) => (
+						<li class:list={{ nested: heading.depth === 3 }}><a href={`#${heading.slug}`}>{heading.text}</a></li>
+					))}
+				</ol>
+			</aside>
+		)}
+	</div>
+	<style>
+		.mobile-doc-nav { display: none; }
+		.wiki-shell {
+			width: min(100% - 2rem, 1400px);
+			margin: 0 auto;
+			padding: 2rem 0 4rem;
+			display: grid;
+			grid-template-columns: 244px minmax(0, 760px) minmax(150px, 190px);
+			justify-content: space-between;
+			gap: clamp(2rem, 4vw, 4.5rem);
+			align-items: start;
+		}
+		.doc-tree {
+			position: sticky;
+			top: calc(var(--header-height) + 1.5rem);
+			max-height: calc(100vh - var(--header-height) - 3rem);
+			overflow-y: auto;
+			padding-right: 0.65rem;
+			scrollbar-width: thin;
+		}
+		.tree-home {
+			display: block;
+			margin-bottom: 1.6rem;
+			padding-bottom: 0.75rem;
+			border-bottom: 1px solid var(--line);
+			color: var(--ink-soft);
+			font-size: 0.9rem;
+			font-weight: 700;
+			text-decoration: none;
+		}
+		.tree-home[aria-current='page'] { color: var(--accent-strong); }
+		.tree-group + .tree-group { margin-top: 1.5rem; }
+		.tree-heading { display: grid; grid-template-columns: 24px 1fr; gap: 0.55rem; align-items: start; }
+		.tree-index {
+			padding-top: 0.1rem;
+			color: var(--accent-secondary);
+			font-family: "JetBrains Mono", ui-monospace, monospace;
+			font-size: 0.7rem;
+			font-weight: 700;
+		}
+		.tree-heading h2 { margin: 0; font-size: 0.87rem; line-height: 1.4; }
+		.tree-heading p { margin: 0.12rem 0 0; color: var(--ink-faint); font-size: 0.72rem; line-height: 1.45; }
+		.tree-group ul { list-style: none; margin: 0.55rem 0 0 2rem; padding: 0; }
+		.tree-group li + li { margin-top: 0.12rem; }
+		.tree-group a {
+			display: block;
+			padding: 0.28rem 0.45rem;
+			border-radius: var(--radius-sm);
+			color: var(--ink-soft);
+			font-size: 0.82rem;
+			line-height: 1.45;
+			text-decoration: none;
+		}
+		.tree-group a:hover { background: var(--surface-subtle); color: var(--ink); }
+		.tree-group a[aria-current='page'] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+		.doc-content { min-width: 0; }
+		.doc-content :global(.doc-header) { margin-bottom: 2.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+		.doc-content :global(.doc-kicker) {
+			margin: 0 0 0.55rem;
+			color: var(--accent-secondary);
+			font-family: "JetBrains Mono", ui-monospace, monospace;
+			font-size: 0.75rem;
+			font-weight: 700;
+			text-transform: uppercase;
+		}
+		.doc-content :global(h1) {
+			margin: 0;
+			font-size: 3rem;
+			line-height: 1.2;
+			font-weight: 780;
+			text-wrap: balance;
+		}
+		.doc-content :global(.doc-description) { max-width: 680px; margin: 0.85rem 0 0; color: var(--ink-soft); font-size: 1.06rem; }
+		.doc-content :global(h2) {
+			margin: 2.8rem 0 0.8rem;
+			padding-top: 0.15rem;
+			font-size: 1.45rem;
+			line-height: 1.35;
+			text-wrap: pretty;
+		}
+		.doc-content :global(h3) { margin: 2rem 0 0.55rem; font-size: 1.08rem; line-height: 1.45; }
+		.doc-content :global(p) { margin: 0.85rem 0; }
+		.doc-content :global(ul),
+		.doc-content :global(ol) { padding-left: 1.35rem; }
+		.doc-content :global(li) { padding-left: 0.16rem; }
+		.doc-content :global(li + li) { margin-top: 0.35rem; }
+		.doc-content :global(strong) { color: var(--ink); font-weight: 720; }
+		.doc-content :global(table) {
+			display: block;
+			width: 100%;
+			margin: 1.15rem 0;
+			border-collapse: collapse;
+			overflow-x: auto;
+			font-size: 0.9rem;
+		}
+		.doc-content :global(th),
+		.doc-content :global(td) { min-width: 8rem; border-bottom: 1px solid var(--line); padding: 0.65rem 0.75rem; text-align: left; vertical-align: top; }
+		.doc-content :global(th) { background: var(--surface-subtle); color: var(--ink); font-size: 0.82rem; }
+		.doc-content :global(blockquote) {
+			margin: 1.35rem 0;
+			padding: 0.8rem 1rem;
+			background: var(--surface-subtle);
+			border: 1px solid var(--line);
+			border-radius: var(--radius-sm);
+			color: var(--ink-soft);
+		}
+		.doc-content :global(blockquote p:first-child) { margin-top: 0; }
+		.doc-content :global(blockquote p:last-child) { margin-bottom: 0; }
+		.doc-content :global(hr) { margin: 2.5rem 0; border: 0; border-top: 1px solid var(--line); }
+		.toc {
+			position: sticky;
+			top: calc(var(--header-height) + 1.5rem);
+			max-height: calc(100vh - var(--header-height) - 3rem);
+			overflow-y: auto;
+		}
+		.toc p { margin: 0 0 0.55rem; color: var(--ink); font-size: 0.78rem; font-weight: 750; }
+		.toc ol { list-style: none; margin: 0; padding: 0; }
+		.toc li + li { margin-top: 0.36rem; }
+		.toc li.nested { padding-left: 0.75rem; }
+		.toc a { display: block; color: var(--ink-faint); font-size: 0.76rem; line-height: 1.45; text-decoration: none; }
+		.toc a:hover { color: var(--accent); }
+		@media (max-width: 1120px) {
+			.wiki-shell { grid-template-columns: 230px minmax(0, 760px); justify-content: center; }
+			.toc { display: none; }
+		}
+		@media (max-width: 800px) {
+			.mobile-doc-nav {
+				display: block;
+				position: sticky;
+				top: var(--header-height);
+				z-index: 20;
+				background: var(--canvas);
+				border-bottom: 1px solid var(--line);
+			}
+			.mobile-doc-nav details { width: min(100% - 1.5rem, 760px); margin: 0 auto; }
+			.mobile-doc-nav summary {
+				min-height: 46px;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				color: var(--ink-soft);
+				font-size: 0.84rem;
+				font-weight: 700;
+				cursor: pointer;
+				list-style: none;
+			}
+				.mobile-doc-nav .mobile-nav-icon { color: var(--accent); transition: transform 0.15s ease; }
+				.mobile-doc-nav details[open] .mobile-nav-icon { transform: rotate(180deg); }
+			.mobile-doc-panel { max-height: 64vh; overflow-y: auto; padding: 0.25rem 0 1rem; }
+			.mobile-doc-panel a { display: block; min-height: 44px; padding: 0.65rem 0.7rem; color: var(--ink-soft); text-decoration: none; }
+			.mobile-doc-panel a[aria-current='page'] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+			.mobile-doc-panel .overview-link { border-bottom: 1px solid var(--line); color: var(--ink); font-weight: 700; }
+			.mobile-group { padding-top: 0.85rem; }
+			.mobile-group strong { display: block; padding: 0 0.7rem 0.25rem; color: var(--accent-secondary); font-size: 0.74rem; }
+			.doc-tree { display: none; }
+			.wiki-shell { width: min(100% - 1.5rem, 760px); display: block; padding-top: 2.25rem; }
+			.doc-content :global(h1) { font-size: 2.35rem; }
+			.doc-content :global(.doc-description) { font-size: 1rem; }
+		}
+	</style>
+</Base>

@@ -1,0 +1,137 @@
+---
+// wiki 文章路由：/wiki/<section>/<slug>/
+import Wiki from '../../layouts/Wiki.astro';
+import { getCollection, render } from 'astro:content';
+import { ArrowLeft, ArrowRight } from '@lucide/astro';
+
+const sectionOrder = ['tutorials', 'how-to', 'reference', 'explanation'];
+
+export async function getStaticPaths() {
+	const entries = await getCollection('wiki');
+	return entries.map((entry) => ({
+		params: { slug: entry.id },
+		props: { entry },
+	}));
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const { title, description, updated, section } = entry.data;
+
+// 全站阅读顺序：tutorials → how-to → reference → explanation，象限内按 order
+const all = await getCollection('wiki');
+const ordered = all.sort((a, b) => {
+	const sa = sectionOrder.indexOf(a.data.section);
+	const sb = sectionOrder.indexOf(b.data.section);
+	return sa !== sb ? sa - sb : a.data.order - b.data.order;
+});
+const index = ordered.findIndex((item) => item.id === entry.id);
+const prev = index > 0 ? ordered[index - 1] : null;
+const next = index < ordered.length - 1 ? ordered[index + 1] : null;
+
+const editURL = `https://github.com/Sheyiyuan/GoDoIt/edit/main/wiki/src/content/wiki/${entry.id}.md`;
+const updatedLabel = updated ? new Intl.DateTimeFormat('en-CA').format(updated) : null;
+const sectionLabels = {
+	tutorials: '教程',
+	'how-to': '操作指南',
+	reference: '参考',
+	explanation: '解释',
+};
+---
+
+<Wiki title={`${title} · GoDoIt Wiki`} description={description} active={entry.id} headings={headings}>
+	<header class="doc-header">
+		<p class="doc-kicker">{sectionLabels[section]} / GoDoIt Wiki</p>
+		<h1>{title}</h1>
+		<p class="doc-description">{description}</p>
+	</header>
+	<Content />
+	<footer class="doc-foot">
+		<div class="edit-line">
+			<a href={editURL} target="_blank" rel="noopener">在 GitHub 上编辑此页面</a>
+			{updatedLabel && <span class="updated">最后更新于 {updatedLabel}</span>}
+		</div>
+		<nav class="pager">
+			{prev ? (
+				<a class="page prev" href={`/wiki/${prev.id}/`}>
+						<span class="dir"><ArrowLeft size={15} stroke-width={1.8} aria-hidden="true" />上一页</span>
+					<span class="t">{prev.data.title}</span>
+				</a>
+			) : (
+				<span></span>
+			)}
+			{next ? (
+				<a class="page next" href={`/wiki/${next.id}/`}>
+						<span class="dir">下一页<ArrowRight size={15} stroke-width={1.8} aria-hidden="true" /></span>
+					<span class="t">{next.data.title}</span>
+				</a>
+			) : (
+				<span></span>
+			)}
+		</nav>
+	</footer>
+	<style>
+		.doc-foot {
+			margin-top: 4rem;
+			border-top: 1px solid var(--line);
+			padding-top: 1.2rem;
+		}
+		.edit-line {
+			display: flex;
+			justify-content: space-between;
+			align-items: baseline;
+			gap: 1rem;
+			font-size: 0.85rem;
+			color: var(--ink-soft);
+		}
+		.pager {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			gap: 1rem;
+			margin-top: 1.2rem;
+		}
+		.page {
+			display: flex;
+			flex-direction: column;
+			gap: 0.15rem;
+			min-height: 76px;
+			border: 1px solid var(--line);
+			border-radius: var(--radius-sm);
+			padding: 0.75rem 0.9rem;
+			color: var(--ink);
+			transition: border-color 0.15s;
+		}
+		.page:hover {
+			text-decoration: none;
+			border-color: var(--accent);
+			background: var(--surface-subtle);
+		}
+		.page.next {
+			text-align: right;
+		}
+			.page .dir {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.3rem;
+				font-size: 0.78rem;
+				color: var(--ink-faint);
+			}
+			.page.next .dir {
+				justify-content: flex-end;
+			}
+		.page .t {
+			font-weight: 600;
+		}
+		@media (max-width: 640px) {
+			.pager {
+				grid-template-columns: 1fr;
+			}
+				.page.next {
+					text-align: left;
+				}
+				.page.next .dir {
+					justify-content: flex-start;
+				}
+		}
+	</style>
+</Wiki>

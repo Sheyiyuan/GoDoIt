@@ -27,11 +27,14 @@ const (
 var (
 	sha256Pattern = regexp.MustCompile(`(?i)^[0-9a-f]{64}$`)
 	sha512Pattern = regexp.MustCompile(`(?i)^[0-9a-f]{128}$`)
-	// stableTagPattern 只接受三段的稳定版 tag，过滤 rc/beta/dev 和非三段 tag（如 4.7-stable）。
-	stableTagPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+-stable$`)
+	// stableTagPattern 接受两/三段稳定版 tag：4.5.2-stable、4.7-stable（官方 minor
+	// 首发不写 .0，4.7-stable 即 4.7.0）。
+	stableTagPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?-stable$`)
+	// prereleaseTagPattern 接受两/三段预发布 tag：4.8-dev3、4.7.2-rc1、4.7-rc3、4.7.1-beta2。
+	prereleaseTagPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?-(dev|rc|beta|alpha)[0-9]+$`)
 )
 
-// VersionInfo 是来源可用的稳定版本条目。
+// VersionInfo 是来源可用的版本条目（稳定或预发布）。
 type VersionInfo struct {
 	Version  string   // 如 4.5.2
 	Editions []string // 按当前平台资产判断，如 standard、dotnet
@@ -178,7 +181,10 @@ func parseReleases(body []byte) ([]releaseInfo, error) {
 	return result, nil
 }
 
-// listVersionsFromReleases 过滤稳定 tag，并按当前平台资产判断每个版本的 edition。
+// listVersionsFromReleases 过滤稳定与预发布 tag（稳定与预发布均接受两/三段），并按
+// 当前平台资产判断每个版本的 edition。稳定 tag 去掉 -stable 后缀作为版本号
+// （4.5.2-stable → 4.5.2、4.7-stable → 4.7），预发布 tag 原样保留（4.8-dev3、
+// 4.7.2-rc1），与官方资产命名规则一致。
 func listVersionsFromReleases(body []byte) ([]VersionInfo, error) {
 	releases, err := parseReleases(body)
 	if err != nil {
@@ -186,7 +192,7 @@ func listVersionsFromReleases(body []byte) ([]VersionInfo, error) {
 	}
 	var versions []VersionInfo
 	for _, release := range releases {
-		if !stableTagPattern.MatchString(release.Tag) {
+		if !stableTagPattern.MatchString(release.Tag) && !prereleaseTagPattern.MatchString(release.Tag) {
 			continue
 		}
 		version := strings.TrimSuffix(release.Tag, "-stable")
@@ -281,7 +287,7 @@ const (
 	godotHubArtifactTemplate = "https://atomgit.com/godothub/godot/releases/download/{tag}/{asset}"
 )
 
-// ProvidersFromConfig creates providers in the configured fallback order.
+// ProvidersFromConfig 按配置的 fallback 顺序创建来源实现。
 func ProvidersFromConfig(cfg config.File, client *http.Client) ([]Provider, error) {
 	custom := make(map[string]config.CustomSource, len(cfg.CustomSources))
 	for _, item := range cfg.CustomSources {
@@ -324,7 +330,12 @@ func ProvidersFromConfig(cfg config.File, client *http.Client) ([]Provider, erro
 }
 
 func expandURL(template, version, asset string) (string, error) {
-	replacements := strings.NewReplacer("{version}", version, "{tag}", version+"-stable", "{asset}", asset)
+	// 预发布版本（版本号含后缀）的 release tag 就是版本号本身；稳定版才拼 -stable。
+	tag := version + "-stable"
+	if strings.Contains(version, "-") {
+		tag = version
+	}
+	replacements := strings.NewReplacer("{version}", version, "{tag}", tag, "{asset}", asset)
 	rawURL := replacements.Replace(template)
 	if strings.ContainsAny(rawURL, "{}") {
 		return "", errors.New("source URL contains an unsupported template placeholder")

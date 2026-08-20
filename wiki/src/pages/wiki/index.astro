@@ -1,0 +1,95 @@
+---
+// Wiki 总览按读者意图组织所有文章，并提供一条明确的首次阅读路线。
+import Wiki from '../../layouts/Wiki.astro';
+import { getCollection } from 'astro:content';
+import { ArrowUpRight } from '@lucide/astro';
+
+const all = await getCollection('wiki');
+const sections = [
+	{ id: 'tutorials', index: '01', label: '教程', verb: '跟着做', desc: '适合第一次接触 GoDoIt。完整跑通一个过程，再去处理自己的配置。' },
+	{ id: 'how-to', index: '02', label: '操作指南', verb: '解决问题', desc: '已经知道目标，只需要一组可靠步骤。每篇处理一个具体任务。' },
+	{ id: 'reference', index: '03', label: '参考', verb: '查清细节', desc: '核对命令、参数、目录结构和版本映射。内容以准确、可扫描为主。' },
+	{ id: 'explanation', index: '04', label: '解释', verb: '理解设计', desc: '了解条目、资产和 SDK 策略为什么这样工作，方便判断边界。' },
+];
+const sorted = (id: string) => all.filter((entry) => entry.data.section === id).sort((a, b) => a.data.order - b.data.order);
+---
+
+<Wiki title="Wiki · GoDoIt" description="GoDoIt 的教程、操作指南、参考和设计解释。">
+	<header class="doc-header wiki-header">
+		<p class="doc-kicker">Documentation / v0.2</p>
+		<h1>GoDoIt Wiki</h1>
+		<p class="doc-description">第一次来，从教程开始。手上已经有具体问题，就按下面的动作直接进入对应页面。</p>
+	</header>
+
+	<section class="start-path" aria-labelledby="start-title">
+		<div>
+			<p class="route-label">推荐路线</p>
+			<h2 id="start-title">先把第一个引擎跑起来</h2>
+			<p>沿着页面看可用版本，创建条目，启动编辑器，然后确认当前配置。</p>
+		</div>
+			<a href="/wiki/tutorials/hello-godot/">开始教程 <ArrowUpRight size={17} stroke-width={1.8} aria-hidden="true" /></a>
+	</section>
+
+	<div class="section-list">
+		{sections.map((section) => (
+			<section class="section-row">
+				<div class="section-name">
+					<span>{section.index}</span>
+					<div><h2>{section.label}</h2><p>{section.verb}</p></div>
+				</div>
+				<div class="section-pages">
+					<p class="section-description">{section.desc}</p>
+					<ul>
+						{sorted(section.id).map((entry) => (
+							<li>
+								<a href={`/wiki/${entry.id}/`}>
+									<span><strong>{entry.data.title}</strong><small>{entry.data.description}</small></span>
+										<span class="page-icon" aria-hidden="true"><ArrowUpRight size={17} stroke-width={1.8} /></span>
+								</a>
+							</li>
+						))}
+					</ul>
+				</div>
+			</section>
+		))}
+	</div>
+	<style>
+		.wiki-header { max-width: 700px; }
+		.start-path {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 2rem;
+			align-items: end;
+			margin: 0 0 4rem;
+			padding: 1.4rem 1.5rem;
+			background: var(--accent-soft);
+			border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+			border-radius: var(--radius-md);
+		}
+		.route-label { margin: 0 0 0.3rem; color: var(--accent-strong); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; font-weight: 750; }
+		.start-path h2 { margin: 0; padding: 0; font-size: 1.35rem; }
+		.start-path div > p:last-child { max-width: 520px; margin: 0.55rem 0 0; color: var(--ink-soft); font-size: 0.9rem; }
+		.start-path > a { min-height: 44px; display: inline-flex; align-items: center; gap: 0.4rem; color: var(--accent-strong); font-weight: 750; text-decoration: none; white-space: nowrap; }
+		.section-list { border-top: 1px solid var(--line); }
+		.section-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 2.5rem; padding: 2.5rem 0; border-bottom: 1px solid var(--line); }
+		.section-name { display: grid; grid-template-columns: 28px 1fr; gap: 0.45rem; align-items: start; }
+		.section-name > span { padding-top: 0.2rem; color: var(--accent-secondary); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.72rem; font-weight: 750; }
+		.section-name h2 { margin: 0; padding: 0; font-size: 1.2rem; }
+		.section-name p { margin: 0.2rem 0 0; color: var(--ink-faint); font-size: 0.75rem; }
+		.section-description { max-width: 580px; margin: 0 0 1.2rem; color: var(--ink-soft); font-size: 0.9rem; }
+		.section-pages ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+		.section-pages li { padding: 0; margin: 0; }
+		.section-pages a { min-height: 68px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; align-items: center; gap: 1rem; border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+		.section-pages a:hover { background: var(--surface-subtle); }
+		.section-pages a span { display: flex; flex-direction: column; gap: 0.1rem; }
+		.section-pages strong { font-size: 0.92rem; }
+		.section-pages small { color: var(--ink-faint); font-size: 0.78rem; line-height: 1.45; }
+			.section-pages .page-icon { display: inline-flex; color: var(--accent); }
+		@media (max-width: 600px) {
+			.start-path { display: block; margin-bottom: 3rem; padding: 1.2rem; }
+			.start-path > a { margin-top: 1rem; }
+			.section-row { display: block; padding: 2rem 0; }
+			.section-pages { margin-top: 1.25rem; }
+		}
+	</style>
+</Wiki>

@@ -224,7 +224,9 @@ func TestGodotHubProviderListVersionsFiltersAndDetectsEditions(t *testing.T) {
 		{"tag_name":"4.8-dev3","assets":[{"name":"Godot_v4.8-dev3_linux.x86_64.zip"}]},
 		{"tag_name":"4.7.2-rc1","assets":[]},
 		{"tag_name":"4.7-stable","assets":[{"name":"Godot_v4.7-stable_linux.x86_64.zip"}]},
-		{"tag_name":"3.6.2-stable","assets":[{"name":"Godot_v3.6.2-stable_x11.64.zip"}]},
+		{"tag_name":"3.6.2-stable","assets":[
+			{"name":"Godot_v3.6.2-stable_x11.64.zip"},
+			{"name":"Godot_v3.6.2-stable_mono_x11_64.zip"}]},
 		{"tag_name":"4.5.2-stable","assets":[
 			{"name":"Godot_v4.5.2-stable_linux.x86_64.zip"},
 			{"name":"Godot_v4.5.2-stable_mono_linux_x86_64.zip"}]}
@@ -242,11 +244,20 @@ func TestGodotHubProviderListVersionsFiltersAndDetectsEditions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 1 {
-		t.Fatalf("expected only 4.5.2, got %+v", versions)
+	if len(versions) != 4 {
+		t.Fatalf("expected 4.8-dev3, 4.7, 3.6.2 and 4.5.2 (rc without assets filtered), got %+v", versions)
 	}
-	if versions[0].Version != "4.5.2" || len(versions[0].Editions) != 2 || versions[0].Editions[0] != "standard" || versions[0].Editions[1] != "dotnet" {
-		t.Fatalf("unexpected versions: %+v", versions)
+	if versions[0].Version != "4.8-dev3" || len(versions[0].Editions) != 1 || versions[0].Editions[0] != "standard" {
+		t.Fatalf("prerelease version must keep its tag as version and detect editions: %+v", versions[0])
+	}
+	if versions[1].Version != "4.7" || len(versions[1].Editions) != 1 || versions[1].Editions[0] != "standard" {
+		t.Fatalf("two-part stable tag (4.7-stable) must be listed as 4.7: %+v", versions[1])
+	}
+	if versions[2].Version != "3.6.2" || len(versions[2].Editions) != 2 || versions[2].Editions[0] != "standard" || versions[2].Editions[1] != "dotnet" {
+		t.Fatalf("Godot 3.x x11/mono asset naming must be detected: %+v", versions[2])
+	}
+	if versions[3].Version != "4.5.2" || len(versions[3].Editions) != 2 || versions[3].Editions[0] != "standard" || versions[3].Editions[1] != "dotnet" {
+		t.Fatalf("unexpected stable version: %+v", versions[3])
 	}
 }
 

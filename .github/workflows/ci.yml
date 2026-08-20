@@ -1,0 +1,56 @@
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+          cache-dependency-path: |
+            go.work.sum
+            core/go.sum
+            cli/go.sum
+
+      - name: Run format, tests, and vet
+        run: make check
+
+      - name: Run race detector
+        run: make test-race
+
+      - name: Build Linux CLI
+        run: make build
+
+  darwin-build:
+    name: macOS arm64 build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+          cache-dependency-path: |
+            go.work.sum
+            core/go.sum
+            cli/go.sum
+
+      - name: Cross-build CLI
+        run: GOOS=darwin GOARCH=arm64 go build -trimpath -o /tmp/gdit-darwin-arm64 ./cli/cmd/gdit

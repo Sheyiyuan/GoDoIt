@@ -108,7 +108,7 @@ func TestInstallAndListRebuildState(t *testing.T) {
 	if result.Version.ID != "4.5.2-standard" || result.StateRebuildRequired {
 		t.Fatalf("unexpected install result: %+v", result)
 	}
-	launcher := filepath.Join(manager.root, "versions", result.Version.ID, "payload", result.Version.Launcher)
+	launcher := filepath.Join(manager.root, "engines", result.Version.ID, "payload", result.Version.Launcher)
 	if info, err := os.Stat(launcher); err != nil {
 		t.Fatalf("launcher missing: %v", err)
 	} else if info.Mode().Perm()&0o111 == 0 {
@@ -136,6 +136,30 @@ func TestInstallAndListRebuildState(t *testing.T) {
 	_, err = manager.Install(context.Background(), InstallRequest{Version: "4.5.2", Edition: "standard"})
 	if !errors.Is(err, ErrAlreadyInstalled) {
 		t.Fatalf("expected duplicate install error, got %v", err)
+	}
+}
+
+func TestInstallGodot3Asset(t *testing.T) {
+	requireFirstPhaseTarget(t)
+	archiveData := godotArchive(t, "3.6.2", "standard", "godot3 payload")
+	asset, err := platform.AssetName("3.6.2", "standard", platform.Target{OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives := map[string][]byte{asset: archiveData}
+	fixture := newFixtureSource("fixture", archives)
+	manager := managerWithFixture(t, t.TempDir(), []Source{fixture}, archives)
+
+	result, err := manager.Install(context.Background(), InstallRequest{Version: "3.6.2", Edition: "standard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version.ID != "3.6.2-standard" {
+		t.Fatalf("unexpected install result: %+v", result)
+	}
+	launcher := filepath.Join(manager.root, "engines", result.Version.ID, "payload", result.Version.Launcher)
+	if _, err := os.Stat(launcher); err != nil {
+		t.Fatalf("launcher missing: %v", err)
 	}
 }
 
@@ -435,10 +459,14 @@ func TestAvailableMergesAndSortsSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	versions, err := manager.Available(context.Background(), "")
+	channels, err := manager.Available(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(channels) != 1 || channels[0].Name != "4.x" {
+		t.Fatalf("stable versions must group under their major series: %+v", channels)
+	}
+	versions := channels[0].Versions
 	if len(versions) != 3 || versions[0].Version != "4.7.1" || versions[1].Version != "4.6.3" || versions[2].Version != "4.5.2" {
 		t.Fatalf("unexpected order or set: %+v", versions)
 	}
@@ -447,6 +475,32 @@ func TestAvailableMergesAndSortsSources(t *testing.T) {
 	}
 	if len(versions[0].Sources) != 2 || versions[0].Sources[0] != "godothub" || versions[0].Sources[1] != "github" {
 		t.Fatalf("sources were not merged: %+v", versions[0])
+	}
+}
+
+func TestAvailableGroupsPrereleaseIntoDev(t *testing.T) {
+	requireFirstPhaseTarget(t)
+	manager, err := New(Options{RootDir: t.TempDir(), Sources: []Source{
+		&listingSource{name: "github", versions: []source.VersionInfo{
+			{Version: "4.8-dev3", Editions: []string{"standard", "dotnet"}},
+			{Version: "4.7.2-rc1", Editions: []string{"standard"}},
+			{Version: "4.7.1", Editions: []string{"standard"}},
+			{Version: "3.6.2", Editions: []string{"standard"}},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels, err := manager.Available(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 3 || channels[0].Name != "4.x" || channels[1].Name != "3.x" || channels[2].Name != "unstable" {
+		t.Fatalf("unexpected channel grouping or order: %+v", channels)
+	}
+	unstable := channels[2].Versions
+	if len(unstable) != 2 || unstable[0].Version != "4.8-dev3" || unstable[1].Version != "4.7.2-rc1" {
+		t.Fatalf("unstable channel must list prereleases newest first: %+v", unstable)
 	}
 }
 
@@ -467,12 +521,12 @@ func TestAvailableSingleSourceFailureStillMerges(t *testing.T) {
 			warnings = append(warnings, event)
 		}
 	}
-	versions, err := manager.Available(context.Background(), "")
+	channels, err := manager.Available(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 1 || versions[0].Version != "4.5.2" {
-		t.Fatalf("failed source must not block results: %+v", versions)
+	if len(channels) != 1 || channels[0].Name != "4.x" || len(channels[0].Versions) != 1 || channels[0].Versions[0].Version != "4.5.2" {
+		t.Fatalf("failed source must not block results: %+v", channels)
 	}
 	if len(warnings) != 1 || warnings[0].Source != "down" {
 		t.Fatalf("expected one warning for the failed source: %+v", warnings)
@@ -488,12 +542,12 @@ func TestAvailableWithSpecifiedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	versions, err := manager.Available(context.Background(), "two")
+	channels, err := manager.Available(context.Background(), "two")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 1 || versions[0].Version != "4.7.1" || versions[0].Sources[0] != "two" {
-		t.Fatalf("unexpected specified-source result: %+v", versions)
+	if len(channels) != 1 || len(channels[0].Versions) != 1 || channels[0].Versions[0].Version != "4.7.1" || channels[0].Versions[0].Sources[0] != "two" {
+		t.Fatalf("unexpected specified-source result: %+v", channels)
 	}
 }
 
@@ -797,8 +851,8 @@ func (s *stubSource) Resolve(context.Context, SourceRequest) (Artifact, error) {
 }
 
 // godotArchive 构造与真实资产一致的 fixture zip：
-// 标准版平铺放置 Godot_v{ver}-stable_linux.x86_64；mono 版为同名目录包裹，
-// 内部是可执行文件 Godot_v{ver}-stable_mono_linux.x86_64 与 GodotSharp/ 目录。
+// 标准版平铺放置 Godot_v{ver}-stable_linux.x86_64；mono 版为同名目录包裹（4.x 外层
+// 目录下划线、内层可执行文件点号，3.x 目录与文件同名），内部另有 GodotSharp/ 目录。
 func godotArchive(t *testing.T, version, edition, payload string) []byte {
 	t.Helper()
 	asset, err := platform.AssetName(version, edition, platform.Target{OS: "linux", Arch: "amd64"})
@@ -807,7 +861,17 @@ func godotArchive(t *testing.T, version, edition, payload string) []byte {
 	}
 	launcher := strings.TrimSuffix(asset, ".zip")
 	if edition == "dotnet" {
-		launcher = launcher + "/Godot_v" + version + "-stable_mono_linux.x86_64"
+		suffix := "-stable"
+		if strings.Contains(version, "-") {
+			suffix = ""
+		}
+		if strings.HasPrefix(version, "3.") {
+			// 3.x mono：目录与可执行文件同名（mono_x11_64）。
+			launcher = launcher + "/" + filepath.Base(launcher)
+		} else {
+			// 4.x mono：目录下划线，内层可执行文件点号（与官方资产一致）。
+			launcher = launcher + "/Godot_v" + version + suffix + "_mono_linux.x86_64"
+		}
 	}
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)

@@ -11,11 +11,16 @@ import (
 const validInstalledAt = "2026-08-17T00:00:00Z"
 
 func buildManifest(id, algorithm, checksum string) Manifest {
-	parts := strings.SplitN(id, "-", 2)
+	version := strings.TrimSuffix(id, "-standard")
+	edition := "standard"
+	if strings.HasSuffix(id, "-dotnet") {
+		version = strings.TrimSuffix(id, "-dotnet")
+		edition = "dotnet"
+	}
 	return Manifest{
 		ID:                id,
-		Version:           parts[0],
-		Edition:           parts[1],
+		Version:           version,
+		Edition:           edition,
 		TargetOS:          "linux",
 		TargetArch:        "amd64",
 		Source:            "fixture",
@@ -28,7 +33,7 @@ func buildManifest(id, algorithm, checksum string) Manifest {
 
 func writeVersionDir(t *testing.T, s *Store, id string, manifest Manifest) {
 	t.Helper()
-	dir := s.VersionDir(id)
+	dir := s.EngineDir(id)
 	if err := os.MkdirAll(filepath.Join(dir, "payload"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +62,7 @@ func TestScanValidAcceptsSHA256AndSHA512(t *testing.T) {
 func TestScanValidSkipsInvalidManifests(t *testing.T) {
 	s := New(t.TempDir())
 	// manifest ID 与目录名不一致。
-	mismatchDir := s.VersionDir("4.5.2-standard")
+	mismatchDir := s.EngineDir("4.5.2-standard")
 	if err := os.MkdirAll(filepath.Join(mismatchDir, "payload"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +76,7 @@ func TestScanValidSkipsInvalidManifests(t *testing.T) {
 	writeVersionDir(t, s, "4.5.3-standard", buildManifest("4.5.3-standard", "md5", strings.Repeat("c", 32)))
 	// launcher 文件缺失。
 	missingLauncher := buildManifest("4.5.4-standard", "sha256", strings.Repeat("d", 64))
-	dir := s.VersionDir("4.5.4-standard")
+	dir := s.EngineDir("4.5.4-standard")
 	if err := os.MkdirAll(filepath.Join(dir, "payload"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +95,7 @@ func TestScanValidSkipsInvalidManifests(t *testing.T) {
 func TestValidateManifestRejectsBadChecksumLength(t *testing.T) {
 	s := New(t.TempDir())
 	manifest := buildManifest("4.5.2-standard", "sha256", strings.Repeat("a", 128))
-	dir := s.VersionDir("4.5.2-standard")
+	dir := s.EngineDir("4.5.2-standard")
 	if err := os.MkdirAll(filepath.Join(dir, "payload"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +151,7 @@ func TestPublishReportsDestinationExists(t *testing.T) {
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(s.VersionDir("4.5.2-standard"), 0o755); err != nil {
+	if err := os.MkdirAll(s.EngineDir("4.5.2-standard"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	published, err := s.Publish(staging, "4.5.2-standard")
@@ -163,6 +168,23 @@ func TestPublishRejectsStagingOutsideTmp(t *testing.T) {
 	}
 	if _, err := s.Publish(outside, "4.5.2-standard"); err == nil {
 		t.Fatal("expected staging outside tmp to be rejected")
+	}
+}
+
+func TestPublishRejectsInvalidEngineID(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	staging := filepath.Join(s.TmpDir(), "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Publish(staging, "11.0.100-preview.7.26381.103-standard"); err == nil {
+		t.Fatal("SDK-shaped engine ID must be rejected before publish")
+	}
+	if _, err := os.Stat(s.EngineDir("11.0.100-preview.7.26381.103-standard")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid engine directory was published: %v", err)
 	}
 }
 
@@ -188,7 +210,7 @@ func TestPublishReportsPublishedWhenSyncFails(t *testing.T) {
 	if !published || err == nil {
 		t.Fatalf("expected published=true with sync error, got published=%v err=%v", published, err)
 	}
-	if _, statErr := os.Stat(s.VersionDir("4.5.2-standard")); statErr != nil {
+	if _, statErr := os.Stat(s.EngineDir("4.5.2-standard")); statErr != nil {
 		t.Fatalf("version directory was not published: %v", statErr)
 	}
 	records, scanErr := s.ScanValid()
@@ -198,7 +220,7 @@ func TestPublishReportsPublishedWhenSyncFails(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 record after publish, got %d", len(records))
 	}
-	changed, reconcileErr := s.ReconcileState(records)
+	changed, reconcileErr := s.ReconcileState(records, nil)
 	if reconcileErr != nil {
 		t.Fatal(reconcileErr)
 	}
@@ -217,7 +239,7 @@ func TestReconcileStateRebuildsFromRecords(t *testing.T) {
 	if err := os.WriteFile(s.StatePath(), []byte("broken = ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := s.ReconcileState(records)
+	changed, err := s.ReconcileState(records, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +250,88 @@ func TestReconcileStateRebuildsFromRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, err = s.ReconcileState(records)
+	changed, err = s.ReconcileState(records, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if changed {
 		t.Fatal("expected no rewrite when state matches records")
+	}
+}
+
+func TestReadCurrentRequiresDirectInstanceTarget(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id := "3f2a9c1e-8b4d-4f2a-9c1e-8b4df2a9c1e8"
+	if err := os.WriteFile(filepath.Join(s.InstancesDir(), id+".toml"), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrent(id); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := s.ReadCurrent(); err != nil || current != id {
+		t.Fatalf("unexpected current: %q err=%v", current, err)
+	}
+	// 非法目标：非 UUID 文件名、嵌套目录、绝对路径，一律拒绝。
+	for _, target := range []string{
+		filepath.Join("instances", "work.toml"),
+		filepath.Join("instances", "nested", id+".toml"),
+		"/abs/path.toml",
+	} {
+		if err := os.Remove(s.CurrentPath()); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, s.CurrentPath()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ReadCurrent(); err == nil {
+			t.Fatalf("current target %q should be rejected", target)
+		}
+	}
+}
+
+func TestSetCurrentSyncFailureReportsErrorAndRestoresOldLink(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	oldID := "3f2a9c1e-8b4d-4f2a-9c1e-8b4df2a9c1e8"
+	newID := "7c4b8d2a-1e6f-4b3a-9d5c-2f8e6a4b1c3d"
+	for _, id := range []string{oldID, newID} {
+		if err := os.WriteFile(filepath.Join(s.InstancesDir(), id+".toml"), []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetCurrent(oldID); err != nil {
+		t.Fatal(err)
+	}
+	// rename 后的父目录 fsync 失败：对调用方返回错误前必须恢复旧链接。
+	s.syncDir = func(string) error { return errors.New("injected sync failure") }
+	if err := s.SetCurrent(newID); err == nil {
+		t.Fatal("expected sync failure to be reported")
+	}
+	s.syncDir = syncDirectory
+	if current, err := s.ReadCurrent(); err != nil || current != oldID {
+		t.Fatalf("old link must be restored after sync failure: %q err=%v", current, err)
+	}
+}
+
+func TestSetCurrentInitialSyncFailureLeavesNoLink(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id := "3f2a9c1e-8b4d-4f2a-9c1e-8b4df2a9c1e8"
+	if err := os.WriteFile(filepath.Join(s.InstancesDir(), id+".toml"), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.syncDir = func(string) error { return errors.New("injected sync failure") }
+	if err := s.SetCurrent(id); err == nil {
+		t.Fatal("expected sync failure to be reported")
+	}
+	if _, err := os.Lstat(s.CurrentPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed initial switch must not leave current: %v", err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	ansiRed   = "\x1b[31m"
 	ansiGreen = "\x1b[32m"
 	ansiGray  = "\x1b[90m"
 	ansiReset = "\x1b[0m"
@@ -235,7 +236,32 @@ func progressLabel(event gdit.ProgressEvent) string {
 	return event.Source
 }
 
-// progressWriter 返回渲染 ProgressEvent 的闭包（兼容旧调用方式）。
-func progressWriter(stderr io.Writer) func(gdit.ProgressEvent) {
-	return newProgressRenderer(stderr).render
+// spinnerFrames 是等待动画的旋转帧（Braille 点）。
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// startSpinner 在 TTY 下启动一个位于 stderr 的等待动画，返回停止函数；停止时清掉动画行。
+// 非 TTY（管道/脚本）返回 no-op，不污染 stdout/stderr 的机器输出。
+func startSpinner(stderr io.Writer, message string) func() {
+	if !term.IsTerminal(int(os.Stderr.Fd())) {
+		return func() {}
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(progressRefreshInterval)
+		defer ticker.Stop()
+		index := 0
+		for {
+			select {
+			case <-stop:
+				fmt.Fprintf(stderr, "\r\x1b[2K")
+				return
+			case <-ticker.C:
+				fmt.Fprintf(stderr, "\r%s %s", spinnerFrames[index%len(spinnerFrames)], message)
+				index++
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
 }

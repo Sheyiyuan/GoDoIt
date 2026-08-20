@@ -1,4 +1,4 @@
-// Package gdit 提供 GoDoIt CLI 和 GUI 共用的引擎安装与版本查询能力。
+// Package gdit 提供 GoDoIt CLI 和 GUI 共用的条目、引擎、SDK 与启动环境能力。
 package gdit
 
 import (
@@ -21,23 +21,27 @@ import (
 
 	"github.com/Sheyiyuan/GoDoIt/core/internal/archive"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/config"
+	"github.com/Sheyiyuan/GoDoIt/core/internal/dotnet"
+	"github.com/Sheyiyuan/GoDoIt/core/internal/instance"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/lock"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/platform"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/source"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/store"
+	managedversion "github.com/Sheyiyuan/GoDoIt/core/internal/version"
 )
 
 const defaultHTTPTimeout = 30 * time.Minute
 const operationDirectoryMode = 0o755
 const downloadBufferSize = 32 * 1024
 
-// Manager 负责一个 gdit 根目录中的安装和版本查询。
+// Manager 负责一个 gdit 根目录中的资产、条目和启动环境管理。
 type Manager struct {
 	root     string
 	client   *http.Client
 	progress func(ProgressEvent)
 	sources  []Source
 	now      func() time.Time
+	sdkProbe func(context.Context) ([]SDKInfo, error)
 }
 
 // DefaultRoot 返回当前用户的 ~/.gdit 路径。
@@ -65,17 +69,33 @@ func New(options Options) (*Manager, error) {
 	if client == nil {
 		client = &http.Client{Timeout: defaultHTTPTimeout}
 	}
-	return &Manager{
+	manager := &Manager{
 		root:     root,
 		client:   client,
 		progress: options.Progress,
 		sources:  append([]Source(nil), options.Sources...),
 		now:      time.Now,
-	}, nil
+	}
+	manager.sdkProbe = options.SDKProbe
+	if manager.sdkProbe == nil {
+		manager.sdkProbe = func(ctx context.Context) ([]SDKInfo, error) {
+			items, err := dotnet.ProbeSystem(ctx, "")
+			result := make([]SDKInfo, 0, len(items))
+			for _, item := range items {
+				result = append(result, SDKInfo{Version: item.Version, Kind: item.Kind, Path: item.Path})
+			}
+			return result, err
+		}
+	}
+	return manager, nil
 }
 
 // Install 下载、校验并原子发布一个 Godot 版本。
 func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallResult, error) {
+	return m.installEngine(ctx, request, false)
+}
+
+func (m *Manager) installEngine(ctx context.Context, request InstallRequest, lockHeld bool) (InstallResult, error) {
 	version, edition, err := normalizeRequest(request)
 	if err != nil {
 		return InstallResult{}, err
@@ -92,11 +112,14 @@ func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallR
 	if err := storeRoot.Init(); err != nil {
 		return InstallResult{}, localIOError("initialize store", err)
 	}
-	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
-	if err != nil {
-		return InstallResult{}, contextOrLocalIOError("acquire store lock", err)
+	var guard *lock.File
+	if !lockHeld {
+		guard, err = lock.Acquire(ctx, storeRoot.LockPath())
+		if err != nil {
+			return InstallResult{}, contextOrLocalIOError("acquire store lock", err)
+		}
+		defer guard.Close()
 	}
-	defer guard.Close()
 	if err := storeRoot.CleanupOperations(); err != nil {
 		return InstallResult{}, localIOError("clean up stale operation directories", err)
 	}
@@ -227,7 +250,13 @@ func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallR
 			m.emit(ProgressEvent{Stage: "warning", Source: provider.Name(), Message: err.Error()})
 			return result, nil
 		}
-		stateChanged, stateErr := storeRoot.ReconcileState(records)
+		sdkRecords, sdkScanErr := storeRoot.ScanSDKs()
+		if sdkScanErr != nil {
+			result.StateRebuildRequired = true
+			m.emit(ProgressEvent{Stage: "warning", Source: provider.Name(), Message: sdkScanErr.Error()})
+			return result, nil
+		}
+		stateChanged, stateErr := storeRoot.ReconcileState(records, sdkRecords)
 		if stateErr != nil {
 			result.StateRebuildRequired = true
 			m.emit(ProgressEvent{Stage: "warning", Source: provider.Name(), Message: stateErr.Error()})
@@ -259,7 +288,11 @@ func (m *Manager) List(ctx context.Context) ([]InstalledVersion, error) {
 	if err != nil {
 		return nil, localIOError("scan installed versions", err)
 	}
-	if matches, stateErr := storeRoot.StateMatches(records); stateErr == nil && matches {
+	sdkRecords, err := storeRoot.ScanSDKs()
+	if err != nil {
+		return nil, localIOError("scan installed SDKs", err)
+	}
+	if matches, stateErr := storeRoot.StateMatches(records, sdkRecords); stateErr == nil && matches {
 		return manifestList(records), nil
 	}
 	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
@@ -271,8 +304,14 @@ func (m *Manager) List(ctx context.Context) ([]InstalledVersion, error) {
 	if err != nil {
 		return nil, localIOError("scan installed versions", err)
 	}
-	if _, err := storeRoot.ReconcileState(records); err != nil {
-		return nil, localIOError("reconcile state index", err)
+	sdkRecords, err = storeRoot.ScanSDKs()
+	if err != nil {
+		return nil, localIOError("scan installed SDKs", err)
+	}
+	if _, err := storeRoot.ReconcileState(records, sdkRecords); err != nil {
+		// 读路径不因索引写失败而阻塞用户查看已安装资产：发警告并返回扫描结果，
+		// 索引留待下次写操作重建（与 remove 路径的降级语义一致）。
+		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
 	}
 	return manifestList(records), nil
 }
@@ -360,9 +399,11 @@ func (m *Manager) checkSourceEnabled(name string) error {
 	return nil
 }
 
-// Available 枚举默认或指定来源上当前平台可安装的稳定版本。
-// sourceName 为空时合并所有支持枚举的来源，单个来源失败不影响其余。
-func (m *Manager) Available(ctx context.Context, sourceName string) ([]AvailableVersion, error) {
+// Available 枚举默认或指定来源上当前平台可安装的版本（稳定版与预发布），按系列分组。
+// 稳定版按 major 分组成 "4.x"/"3.x"，预发布（dev/rc/beta/alpha）统一归入 "unstable" 组；
+// 组间按 major 倒序、unstable 组最后，组内按版本倒序。sourceName 为空时合并所有支持枚举
+// 的来源，单个来源失败不影响其余。
+func (m *Manager) Available(ctx context.Context, sourceName string) ([]EngineChannel, error) {
 	if _, err := platform.CurrentTarget(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupportedPlatform, err)
 	}
@@ -428,7 +469,11 @@ func (m *Manager) Available(ctx context.Context, sourceName string) ([]Available
 		}
 		return nil, fmt.Errorf("%w: no source supports version enumeration", ErrInvalidConfig)
 	}
-	result := make([]AvailableVersion, 0, len(merged))
+	type groupEntry struct {
+		versions []AvailableVersion
+	}
+	groups := make(map[string]*groupEntry)
+	var groupOrder []string
 	for version, item := range merged {
 		editions := make([]string, 0, len(item.editions))
 		for _, candidate := range []string{"standard", "dotnet"} {
@@ -436,21 +481,57 @@ func (m *Manager) Available(ctx context.Context, sourceName string) ([]Available
 				editions = append(editions, candidate)
 			}
 		}
-		result = append(result, AvailableVersion{Version: version, Editions: editions, Sources: item.sources})
+		name := engineChannelName(version)
+		group := groups[name]
+		if group == nil {
+			group = &groupEntry{}
+			groups[name] = group
+			groupOrder = append(groupOrder, name)
+		}
+		group.versions = append(group.versions, AvailableVersion{Version: version, Editions: editions, Sources: item.sources})
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return compareVersions(result[i].Version, result[j].Version) > 0
-	})
+	sort.Slice(groupOrder, func(i, j int) bool { return engineChannelBefore(groupOrder[i], groupOrder[j]) })
+	result := make([]EngineChannel, 0, len(groupOrder))
+	for _, name := range groupOrder {
+		versions := groups[name].versions
+		sort.Slice(versions, func(i, j int) bool {
+			return compareVersions(versions[i].Version, versions[j].Version) > 0
+		})
+		result = append(result, EngineChannel{Name: name, Versions: versions})
+	}
 	return result, nil
 }
 
-// compareVersions 按三段数字语义比较版本，返回正数表示 left 更新。
+// engineChannelName 返回版本所属的分组名：稳定版按 major 系列，预发布归 unstable。
+func engineChannelName(version string) string {
+	if strings.Contains(version, "-") {
+		return "unstable"
+	}
+	return strings.Split(version, ".")[0] + ".x"
+}
+
+// engineChannelBefore 报告 left 分组是否排在 right 前：稳定系列按 major 倒序，unstable 最后。
+func engineChannelBefore(left, right string) bool {
+	if left == "unstable" {
+		return false
+	}
+	if right == "unstable" {
+		return true
+	}
+	lMajor, _ := strconv.Atoi(strings.TrimSuffix(left, ".x"))
+	rMajor, _ := strconv.Atoi(strings.TrimSuffix(right, ".x"))
+	return lMajor > rMajor
+}
+
+// compareVersions 按数字段 + 预发布后缀语义比较版本，返回正数表示 left 更新。
+// 数字段缺段按 0 补全；同数字段时稳定版大于任何预发布，同类型预发布按序号比较。
+// 输入不要求先通过版本校验：越界段按 0 处理，保证任意字符串都不会 panic。
 func compareVersions(left, right string) int {
-	leftParts := strings.Split(left, ".")
-	rightParts := strings.Split(right, ".")
+	leftParts, leftSuffix := splitVersionParts(left)
+	rightParts, rightSuffix := splitVersionParts(right)
 	for i := 0; i < 3; i++ {
-		l, _ := strconv.Atoi(leftParts[i])
-		r, _ := strconv.Atoi(rightParts[i])
+		l, _ := strconv.Atoi(partAt(leftParts, i))
+		r, _ := strconv.Atoi(partAt(rightParts, i))
 		if l != r {
 			if l > r {
 				return 1
@@ -458,36 +539,103 @@ func compareVersions(left, right string) int {
 			return -1
 		}
 	}
+	return compareVersionSuffixes(leftSuffix, rightSuffix)
+}
+
+// versionSuffix 描述预发布后缀；Kind 为空表示稳定版。
+type versionSuffix struct {
+	Kind string // dev / rc / beta / alpha / preview
+	Num  int
+}
+
+// splitVersionParts 把版本拆成数字段与预发布后缀：4.8-dev3 → [4 8] + dev/3；
+// 11.0.100-preview.7.26381.103 → [11 0 100] + preview/7；无后缀时 Kind 为空。
+func splitVersionParts(version string) ([]string, versionSuffix) {
+	part, suffix, found := strings.Cut(version, "-")
+	fields := strings.Split(part, ".")
+	if !found {
+		return fields, versionSuffix{}
+	}
+	kind, num := suffix, 0
+	if index := strings.IndexFunc(suffix, func(r rune) bool { return r >= '0' && r <= '9' }); index > 0 {
+		kind = suffix[:index]
+		digits := suffix[index:]
+		if dot := strings.Index(digits, "."); dot >= 0 {
+			digits = digits[:dot]
+		}
+		num, _ = strconv.Atoi(digits)
+	}
+	return fields, versionSuffix{Kind: kind, Num: num}
+}
+
+// suffixRank 预发布类型优先级：稳定版最大，预览类型按成熟度递减。
+func suffixRank(kind string) int {
+	switch kind {
+	case "":
+		return 5
+	case "dev":
+		return 4
+	case "rc":
+		return 3
+	case "beta":
+		return 2
+	case "alpha":
+		return 1
+	default: // preview（.NET 预览，相当于 alpha 前的预发布）
+		return 0
+	}
+}
+
+// compareVersionSuffixes 比较两个预发布后缀，返回正数表示 left 更新。
+func compareVersionSuffixes(left, right versionSuffix) int {
+	lRank, rRank := suffixRank(left.Kind), suffixRank(right.Kind)
+	if lRank != rRank {
+		if lRank > rRank {
+			return 1
+		}
+		return -1
+	}
+	if left.Num != right.Num {
+		if left.Num > right.Num {
+			return 1
+		}
+		return -1
+	}
 	return 0
 }
 
-// Default 返回当前默认版本 ID。未设置、链接悬空或指向的版本已不完整时返回 ErrNoDefault。
-// 只读，不获取锁。
-func (m *Manager) Default(ctx context.Context) (string, error) {
-	storeRoot := store.New(m.root)
-	id, err := storeRoot.ReadCurrent()
-	if err != nil {
-		if errors.Is(err, store.ErrNoCurrent) {
-			return "", ErrNoDefault
-		}
-		return "", localIOError("read current link", err)
+// partAt 返回版本段切片中第 index 段，越界时返回空串。
+func partAt(parts []string, index int) string {
+	if index < len(parts) {
+		return parts[index]
 	}
-	records, err := storeRoot.ScanValid()
-	if err != nil {
-		return "", localIOError("scan installed versions", err)
-	}
-	if findRecord(records, id) == nil {
-		return "", ErrNoDefault
-	}
-	return id, nil
+	return ""
 }
 
-// SetDefault 把指定版本设为全局默认：拿全局修改锁，锁内校验目标已完整安装，
-// 然后原子替换 current symlink。替换前失败（未安装、锁内 I/O 错误）时旧链接
-// 保持不变；替换成功但父目录同步失败时新链接已生效，返回错误但状态不损坏。
-func (m *Manager) SetDefault(ctx context.Context, id string) error {
-	if !store.ValidID(id) {
-		return fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
+// Default 返回 current 指向的完整条目。未设置或悬空时返回 ErrNoDefault；
+// current 指向的条目损坏（含引擎引用缺失）时返回具体配置错误。
+func (m *Manager) Default(ctx context.Context) (InstanceInfo, error) {
+	id, err := store.New(m.root).ReadCurrent()
+	if err != nil {
+		if errors.Is(err, store.ErrNoCurrent) {
+			return InstanceInfo{}, ErrNoDefault
+		}
+		return InstanceInfo{}, localIOError("read current link", err)
+	}
+	item, err := instance.Read(m.root, id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return InstanceInfo{}, ErrNoDefault
+		}
+		return InstanceInfo{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	return instanceToPublic(item, true), nil
+}
+
+// SetDefault 原子地把指定显示名条目设为 current。
+func (m *Manager) SetDefault(ctx context.Context, name string) error {
+	if err := instance.ValidateName(name); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
 		return localIOError("create store root", err)
@@ -498,23 +646,20 @@ func (m *Manager) SetDefault(ctx context.Context, id string) error {
 		return contextOrLocalIOError("acquire store lock", err)
 	}
 	defer guard.Close()
-	records, err := storeRoot.ScanValid()
+	item, err := instance.Lookup(m.root, name)
 	if err != nil {
-		return localIOError("scan installed versions", err)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
+		}
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if findRecord(records, id) == nil {
-		return fmt.Errorf("%w: %s", ErrNotInstalled, id)
-	}
-	if err := storeRoot.SetCurrent(id); err != nil {
-		return localIOError("set default version", err)
+	if err := storeRoot.SetCurrent(item.ID); err != nil {
+		return localIOError("set current instance", err)
 	}
 	return nil
 }
 
-// Remove 卸载指定版本：拿全局修改锁，删除版本目录后重扫并原子重建 state.toml。
-// 当前默认版本拒绝删除；删除运行中版本的目录不会终止已启动的引擎进程。
-// 版本目录删除成功后，状态索引重建失败不误报删除失败：索引是派生数据，
-// 下次读取会按 versions/ 自动重建，通过进度警告告知。
+// Remove 删除指定引擎资产。任何坏条目或有效引用都会阻止删除。
 func (m *Manager) Remove(ctx context.Context, id string) error {
 	if !store.ValidID(id) {
 		return fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
@@ -528,6 +673,13 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 		return contextOrLocalIOError("acquire store lock", err)
 	}
 	defer guard.Close()
+	items, err := instance.Scan(m.root)
+	if err != nil {
+		return fmt.Errorf("%w: cannot determine asset references: %v", ErrInvalidConfig, err)
+	}
+	if users := instance.BuildReferences(items).Engines[id]; len(users) > 0 {
+		return fmt.Errorf("%w: engine %s is referenced by %s", ErrAssetInUse, id, strings.Join(users, ", "))
+	}
 	records, err := storeRoot.ScanValid()
 	if err != nil {
 		return localIOError("scan installed versions", err)
@@ -536,22 +688,20 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 	if record == nil {
 		return fmt.Errorf("%w: %s", ErrNotInstalled, id)
 	}
-	current, currentErr := storeRoot.ReadCurrent()
-	if currentErr == nil && current == id {
-		return fmt.Errorf("%w: %s", ErrDefaultInUse, id)
-	}
-	if currentErr != nil && !errors.Is(currentErr, store.ErrNoCurrent) {
-		return localIOError("read current link", currentErr)
-	}
-	if err := os.RemoveAll(record.Dir); err != nil {
-		return localIOError("remove version directory", err)
+	if err := storeRoot.RemoveEngine(id); err != nil {
+		return localIOError("remove engine directory", err)
 	}
 	records, err = storeRoot.ScanValid()
 	if err != nil {
 		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
 		return nil
 	}
-	if _, err := storeRoot.ReconcileState(records); err != nil {
+	sdkRecords, err := storeRoot.ScanSDKs()
+	if err != nil {
+		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
+		return nil
+	}
+	if _, err := storeRoot.ReconcileState(records, sdkRecords); err != nil {
 		m.emit(ProgressEvent{Stage: "warning", Message: "state index will be rebuilt on the next read: " + err.Error()})
 		return nil
 	}
@@ -581,40 +731,59 @@ func (m *Manager) Setup(ctx context.Context) error {
 	return nil
 }
 
-// ResolveLaunch 解析启动目标：id 为空时取当前默认版本（未设置、链接悬空或指向的
-// 版本已不完整时均报 ErrNoDefault），否则校验指定版本已完整安装，返回引擎可执行
-// 文件的绝对路径。不做环境合并，不启动子进程。
-func (m *Manager) ResolveLaunch(ctx context.Context, id string) (LaunchTarget, error) {
+// ResolveLaunch 解析条目、引擎、SDK 与最终子进程环境，不访问网络或写盘。
+// name 为空取 current 条目；非空为条目显示名。
+func (m *Manager) ResolveLaunch(ctx context.Context, name string) (LaunchTarget, error) {
 	storeRoot := store.New(m.root)
-	fromDefault := id == ""
-	if id == "" {
-		var err error
-		id, err = storeRoot.ReadCurrent()
+	var item instance.File
+	if name == "" {
+		id, err := storeRoot.ReadCurrent()
 		if err != nil {
 			if errors.Is(err, store.ErrNoCurrent) {
 				return LaunchTarget{}, ErrNoDefault
 			}
 			return LaunchTarget{}, localIOError("read current link", err)
 		}
-	} else if !store.ValidID(id) {
-		return LaunchTarget{}, fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
+		item, err = instance.Read(m.root, id)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return LaunchTarget{}, ErrNoDefault
+			}
+			return LaunchTarget{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+		}
+	} else {
+		if err := instance.ValidateName(name); err != nil {
+			return LaunchTarget{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		}
+		var err error
+		item, err = instance.Lookup(m.root, name)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return LaunchTarget{}, fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
+			}
+			return LaunchTarget{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+		}
 	}
+	id := item.Engine.Version + "-" + item.Engine.Edition
 	records, err := storeRoot.ScanValid()
 	if err != nil {
 		return LaunchTarget{}, localIOError("scan installed versions", err)
 	}
 	record := findRecord(records, id)
 	if record == nil {
-		if fromDefault {
-			return LaunchTarget{}, ErrNoDefault
-		}
-		return LaunchTarget{}, fmt.Errorf("%w: %s", ErrNotInstalled, id)
+		return LaunchTarget{}, fmt.Errorf("%w: %s", ErrEngineNotInstalled, id)
+	}
+	environment, err := m.environmentFor(ctx, item)
+	if err != nil {
+		return LaunchTarget{}, err
 	}
 	return LaunchTarget{
 		ID:         record.Manifest.ID,
 		Version:    record.Manifest.Version,
 		Edition:    record.Manifest.Edition,
 		Executable: filepath.Join(record.Dir, "payload", record.Manifest.Launcher),
+		Args:       environment.Args,
+		Env:        environment.Full,
 	}, nil
 }
 
@@ -764,7 +933,7 @@ func (m *Manager) download(ctx context.Context, artifact Artifact, destination, 
 
 func normalizeRequest(request InstallRequest) (string, string, error) {
 	version := strings.TrimSpace(request.Version)
-	if err := validateVersion(version); err != nil {
+	if err := validateEngineVersion(version); err != nil {
 		return "", "", err
 	}
 	edition := strings.ToLower(strings.TrimSpace(request.Edition))
@@ -780,27 +949,38 @@ func normalizeRequest(request InstallRequest) (string, string, error) {
 	return version, edition, nil
 }
 
-// ValidateVersion 校验精确稳定版语法：三个十进制数字段，拒绝 latest、范围、
-// 预览版和任意后缀。CLI 的交互输入校验与 ParseVersionArg 复用同一实现。
+// ValidateVersion 校验 Godot 引擎版本语法。
+// 保留该名称供现有调用方使用；新代码应优先使用 ValidateEngineVersion。
 func ValidateVersion(version string) error {
-	return validateVersion(strings.TrimSpace(version))
+	return ValidateEngineVersion(version)
 }
 
-// validateVersion 校验精确稳定版语法：三个十进制数字段，拒绝 latest、范围、预览版和任意后缀。
-func validateVersion(version string) error {
-	parts := strings.Split(version, ".")
-	if len(parts) != 3 || version == "" {
-		return fmt.Errorf("%w: version must be MAJOR.MINOR.PATCH", ErrInvalidInput)
+// ValidateEngineVersion 校验 Godot 的两/三段稳定版或 dev/rc/beta/alpha 预发布版本。
+func ValidateEngineVersion(version string) error {
+	return validateEngineVersion(strings.TrimSpace(version))
+}
+
+// ValidateSDKVersion 校验 .NET SDK 的三段稳定版或 preview/rc 预发布版本。
+func ValidateSDKVersion(version string) error {
+	version = strings.TrimSpace(version)
+	if !managedversion.ValidSDK(version) {
+		return fmt.Errorf("%w: SDK version must be MAJOR.MINOR.PATCH, optionally with a preview/rc suffix", ErrInvalidInput)
 	}
-	for _, part := range parts {
-		if part == "" {
-			return fmt.Errorf("%w: version must contain three numeric fields", ErrInvalidInput)
-		}
-		for _, character := range part {
-			if character < '0' || character > '9' {
-				return fmt.Errorf("%w: version must contain only digits", ErrInvalidInput)
-			}
-		}
+	return nil
+}
+
+// ValidEngineID 报告字符串是否为合法引擎资产 ID（三段数字版本（可带预发布后缀）+ standard/dotnet）。
+func ValidEngineID(id string) bool { return store.ValidID(id) }
+
+// IsGodot3 报告版本是否属于 Godot 3.x 系列。3.x 的 dotnet（mono）版依赖系统 Mono
+// 运行时而非 .NET SDK，GoDoIt 只负责下载安装，不做 SDK 解析与注入。
+func IsGodot3(version string) bool {
+	return strings.HasPrefix(version, "3.")
+}
+
+func validateEngineVersion(version string) error {
+	if !managedversion.ValidEngine(version) {
+		return fmt.Errorf("%w: Godot version must be MAJOR.MINOR[.PATCH], optionally with a dev/rc/beta/alpha suffix", ErrInvalidInput)
 	}
 	return nil
 }
@@ -818,7 +998,7 @@ func ParseVersionArg(arg string) (version, edition string, err error) {
 		version = trimmed
 		edition = "standard"
 	}
-	if err := validateVersion(version); err != nil {
+	if err := validateEngineVersion(version); err != nil {
 		return "", "", err
 	}
 	return version, edition, nil

@@ -27,45 +27,55 @@ type managerAPI interface {
 	Sources(context.Context) ([]gdit.SourceInfo, error)
 	SetDefaultSource(context.Context, string) error
 	SetSourceDisabled(context.Context, string, bool) error
-	Available(context.Context, string) ([]gdit.AvailableVersion, error)
-	Default(context.Context) (string, error)
+	Available(context.Context, string) ([]gdit.EngineChannel, error)
+	InstallEntry(context.Context, gdit.InstallEntryRequest) (gdit.InstallEntryResult, error)
+	RemoveInstance(context.Context, string) (gdit.RemoveInstanceResult, error)
+	Instances(context.Context) ([]gdit.InstanceInfo, error)
+	Default(context.Context) (gdit.InstanceInfo, error)
 	SetDefault(context.Context, string) error
+	ResolveLaunch(context.Context, string) (gdit.LaunchTarget, error)
+	Orphans(context.Context) ([]gdit.OrphanAsset, error)
+	AutoRemove(context.Context) (gdit.AutoRemoveResult, error)
+	SDKs(context.Context) ([]gdit.SDKInfo, error)
+	AvailableSDKs(context.Context) ([]gdit.SDKChannel, error)
+	InstallSDK(context.Context, string) (gdit.SDKInstallResult, error)
+	RemoveSDK(context.Context, string) error
+	EffectiveEnv(context.Context, string) (gdit.EnvView, error)
+	SetEnvVar(context.Context, string, string, string) error
+	UnsetEnvVar(context.Context, string, string) error
 	Remove(context.Context, string) error
 	Setup(context.Context) error
-	ResolveLaunch(context.Context, string) (gdit.LaunchTarget, error)
 }
 
-// stdinIsTTY 报告标准输入是否为终端；包级变量便于测试替换以触达交互分支。
 var stdinIsTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
-
-// stdoutIsTTY 报告标准输出是否为终端；包级变量便于测试替换以触达着色分支。
 var stdoutIsTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 
-// askInteractive 用 stderr 渲染 survey 提示并读取用户输入，保持 stdout 只输出结果。
-func askInteractive(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
+var askInteractive = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
 	return survey.AskOne(prompt, response, append(opts, survey.WithStdio(os.Stdin, os.Stderr, os.Stderr))...)
 }
 
-// replaceProcess 用引擎可执行文件替换当前进程（shim 路径，execve），
-// 信号、stdio 和退出码天然透传；返回非 nil 表示替换失败。
-var replaceProcess = func(executable string, engineArgs []string) error {
-	return unix.Exec(executable, append([]string{executable}, engineArgs...), os.Environ())
+var replaceProcess = func(executable string, engineArgs, environment []string) error {
+	if environment == nil {
+		environment = os.Environ()
+	}
+	return unix.Exec(executable, append([]string{executable}, engineArgs...), environment)
 }
 
-// spawnProcess 以子进程方式启动引擎并返回其退出码（run 命令路径）。
-// 收到 SIGINT/SIGTERM 时转发给子进程：终端的 Ctrl+C 会直达同进程组的子进程，
-// 但外部 kill 只发给 gdit，NotifyContext 会吞掉信号，需要显式转发。
-var spawnProcess = func(executable string, engineArgs []string, stdout, stderr io.Writer) int {
+var spawnProcess = func(executable string, engineArgs, environment []string, stdout, stderr io.Writer) int {
 	command := exec.Command(executable, engineArgs...)
 	command.Stdin = os.Stdin
 	command.Stdout = stdout
 	command.Stderr = stderr
+	command.Env = environment
+	if command.Env == nil {
+		command.Env = os.Environ()
+	}
 	if err := command.Start(); err != nil {
-		fmt.Fprintf(stderr, "launch %s: %v\n", executable, err)
+		writeErrorf(stderr, "launch %s: %v", executable, err)
 		return 1
 	}
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -87,7 +97,7 @@ var spawnProcess = func(executable string, engineArgs []string, stdout, stderr i
 		}
 		return exitErr.ExitCode()
 	}
-	fmt.Fprintf(stderr, "launch %s: %v\n", executable, err)
+	writeErrorf(stderr, "launch %s: %v", executable, err)
 	return 1
 }
 
@@ -97,28 +107,22 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// isShimInvocation 报告进程是否以 godot 名称启动（argv[0] basename 判断）。
-func isShimInvocation(argv0 string) bool {
-	return filepath.Base(argv0) == "godot"
-}
+func isShimInvocation(argv0 string) bool { return filepath.Base(argv0) == "godot" }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root, err := gdit.DefaultRoot()
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeError(stderr, err)
 		return 1
 	}
 	renderer := newProgressRenderer(stderr)
-	manager, err := gdit.New(gdit.Options{
-		RootDir:  root,
-		Progress: renderer.render,
-	})
+	manager, err := gdit.New(gdit.Options{RootDir: root, Progress: renderer.render})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeError(stderr, err)
 		return 1
 	}
 	if isShimInvocation(os.Args[0]) {
-		return runShim(ctx, args, stdout, stderr, manager)
+		return runShim(ctx, args, stderr, manager)
 	}
 	return runWithManager(ctx, root, args, stdout, stderr, manager, renderer)
 }
@@ -129,88 +133,393 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return 2
 	}
 	switch args[0] {
-	case "install", "i":
+	case "install", "i", "new":
 		return runInstall(ctx, args[1:], stdout, stderr, manager, renderer)
 	case "list", "l":
 		return runList(ctx, args[1:], stdout, stderr, manager)
+	case "default", "d":
+		return runDefault(ctx, args[1:], stdout, stderr, manager)
+	case "remove", "rm":
+		return runRemoveInstance(ctx, args[1:], stdout, stderr, manager)
+	case "run", "r":
+		return runRun(ctx, args[1:], stdout, stderr, manager)
+	case "engine":
+		return runEngine(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "sdk":
+		return runSDK(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "env", "e":
+		return runEnv(ctx, args[1:], stdout, stderr, manager)
+	case "autoremove":
+		return runAutoRemove(ctx, args[1:], stdout, stderr, manager)
 	case "source", "s":
 		return runSource(ctx, args[1:], stdout, stderr, manager)
 	case "available", "a":
 		return runAvailable(ctx, args[1:], stdout, stderr, manager)
-	case "default", "d":
-		return runDefault(ctx, args[1:], stdout, stderr, manager)
-	case "remove", "rm":
-		return runRemove(ctx, args[1:], stdout, stderr, manager)
 	case "setup", "st":
 		return runSetup(ctx, root, args[1:], stdout, stderr, manager)
-	case "run", "r":
-		return runRun(ctx, args[1:], stdout, stderr, manager)
 	case "help", "h", "-h", "--help":
 		writeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
+		writeErrorf(stderr, "unknown command %q", args[0])
 		writeUsage(stderr)
 		return 2
 	}
 }
 
 func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	if len(args) == 0 {
+		return runInteractiveInstall(ctx, stdout, stderr, manager, renderer)
+	}
+	name := ""
+	if !strings.HasPrefix(args[0], "-") {
+		name, args = args[0], args[1:]
+	}
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	edition := flags.String("edition", "standard", "Godot edition: standard or dotnet")
-	flags.StringVar(edition, "e", "standard", "shorthand for --edition")
-	sourceName := flags.String("source", "", "use only this source")
-	flags.StringVar(sourceName, "s", "", "shorthand for --source")
-	if err := flags.Parse(args); err != nil {
+	version := flags.String("version", "", "Godot 版本（必填）")
+	edition := flags.String("edition", "standard", "standard 或 dotnet")
+	flags.StringVar(edition, "e", "standard", "简写")
+	sdk := flags.String("sdk", "", "managed 或 system")
+	sdkVersion := flags.String("sdk-version", "", "托管 SDK 版本")
+	current := flags.Bool("current", false, "设为当前条目")
+	noCurrent := flags.Bool("no-current", false, "不改变 current")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
+		return 2
+	}
+	if name == "" && flags.NArg() == 1 {
+		name = flags.Arg(0)
+	} else if flags.NArg() != 0 {
+		return usage(stderr, "gdit install <name> --version <version> [options]")
+	}
+	if name == "" || *version == "" || *current && *noCurrent {
+		return usage(stderr, "gdit install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current]")
+	}
+	var setCurrent *bool
+	if *current || *noCurrent {
+		value := *current
+		setCurrent = &value
+	}
+	result, err := manager.InstallEntry(ctx, gdit.InstallEntryRequest{Name: name, Version: *version, Edition: *edition, SDKStrategy: *sdk, SDKVersion: *sdkVersion, SetCurrent: setCurrent})
+	writeInstallEntryResult(stdout, stderr, result)
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func runInteractiveInstall(ctx context.Context, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	if !stdinIsTTY() {
+		fmt.Fprintln(stderr, "interactive install requires a terminal; use: gdit install <name> --version <version>")
+		return 2
+	}
+	var request gdit.InstallEntryRequest
+	if err := askInteractive(&survey.Input{Message: "条目名", Default: "default"}, &request.Name, survey.WithValidator(func(answer interface{}) error {
+		return gdit.ValidateInstanceName(strings.TrimSpace(fmt.Sprint(answer)))
+	})); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	if err := askInteractive(&survey.Select{Message: "选择 edition", Options: []string{"standard", "dotnet"}, Default: "standard"}, &request.Edition); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	stop := startSpinner(stderr, "正在枚举可用版本…")
+	channels, availableErr := manager.Available(ctx, "")
+	stop()
+	var choices []string
+	if availableErr == nil {
+		// 第一级：版本系列（4.x/3.x/unstable，只列该 edition 非空的组），第二级选具体版本。
+		var groupNames []string
+		groupVersions := make(map[string][]string)
+		for _, channel := range channels {
+			var versions []string
+			for _, item := range channel.Versions {
+				if contains(item.Editions, request.Edition) {
+					versions = append(versions, item.Version)
+				}
+			}
+			if len(versions) > 0 {
+				groupNames = append(groupNames, channel.Name)
+				groupVersions[channel.Name] = versions
+			}
+		}
+		if len(groupNames) > 0 {
+			pickedGroup := ""
+			if err := askInteractive(&survey.Select{Message: "选择版本系列", Options: groupNames}, &pickedGroup); err != nil {
+				writeError(stderr, err)
+				return 1
+			}
+			choices = groupVersions[pickedGroup]
+		}
+	} else {
+		fmt.Fprintf(stderr, "warning: 无法枚举可用版本：%v\n", availableErr)
+	}
+	if len(choices) > 0 {
+		if err := askInteractive(&survey.Select{Message: "选择版本", Options: choices}, &request.Version); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+	} else if err := askInteractive(&survey.Input{Message: "输入版本号（如 4.5.2）"}, &request.Version, survey.WithValidator(versionValidator)); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	if request.Edition == "dotnet" {
+		if gdit.IsGodot3(request.Version) {
+			// Godot 3.x mono：使用系统 Mono 运行时，无 SDK 概念，不询问策略。
+			fmt.Fprintln(stderr, "info: Godot 3.x mono 使用系统 Mono 运行时，无需配置 SDK")
+		} else if err := askInteractive(&survey.Select{Message: "SDK 策略", Options: []string{"managed", "system"}, Default: "managed"}, &request.SDKStrategy); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		if request.SDKStrategy == "managed" {
+			choice := ""
+			if err := askInteractive(&survey.Select{
+				Message: "SDK 版本",
+				Options: []string{"推荐版本（默认）", "从可选列表选择", "手动输入"},
+				Default: "推荐版本（默认）",
+			}, &choice); err != nil {
+				writeError(stderr, err)
+				return 1
+			}
+			switch choice {
+			case "从可选列表选择":
+				if err := askSDKVersion(ctx, manager, stderr, &request.SDKVersion); err != nil {
+					writeError(stderr, err)
+					return 1
+				}
+			case "手动输入":
+				if err := askInteractive(&survey.Input{Message: "输入 SDK 版本（如 8.0.410）"}, &request.SDKVersion, survey.WithValidator(versionValidator)); err != nil {
+					writeError(stderr, err)
+					return 1
+				}
+			default:
+				// 推荐版本（默认）：留空，由 core 按映射表解析推荐 major 的最新 patch。
+			}
+		}
+	}
+	_, currentErr := manager.Default(ctx)
+	if currentErr != nil && !errors.Is(currentErr, gdit.ErrNoDefault) {
+		writeError(stderr, currentErr)
+		return 1
+	}
+	setCurrent := errors.Is(currentErr, gdit.ErrNoDefault)
+	if err := askInteractive(&survey.Confirm{Message: "设为当前条目？", Default: setCurrent}, &setCurrent); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	request.SetCurrent = &setCurrent
+	result, err := manager.InstallEntry(ctx, request)
+	writeInstallEntryResult(stdout, stderr, result)
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func versionValidator(answer interface{}) error {
+	return gdit.ValidateVersion(strings.TrimSpace(fmt.Sprint(answer)))
+}
+
+func runList(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	if len(args) != 0 {
+		return usage(stderr, "gdit list")
+	}
+	items, err := manager.Instances(ctx)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	for _, item := range items {
+		line := fmt.Sprintf("%s\t%s\t%s", item.Name, item.Engine, item.Edition)
+		if item.SDKStrategy != "" {
+			line += "\t" + item.SDKStrategy
+			if item.SDK != "" {
+				line += ":" + item.SDK
+			}
+		}
+		if item.Current {
+			line = defaultLine(line + "\tcurrent")
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	return 0
+}
+
+func runDefault(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	if len(args) > 1 {
+		return usage(stderr, "gdit default [<name>]")
+	}
+	if len(args) == 1 {
+		if err := gdit.ValidateInstanceName(args[0]); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		if err := manager.SetDefault(ctx, args[0]); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "default: %s\n", args[0])
+		return 0
+	}
+	item, err := manager.Default(ctx)
+	if err != nil {
+		writeDefaultError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "default: %s\t%s\t%s", item.Name, item.Engine, item.Edition)
+	if item.SDKStrategy != "" {
+		fmt.Fprintf(stdout, "\t%s", item.SDKStrategy)
+	}
+	fmt.Fprintln(stdout)
+	return 0
+}
+
+func runRemoveInstance(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	name, yes, code := parseConfirmedTarget(args, "gdit remove [-y|--yes] <name>", stderr)
+	if code != 0 {
+		return code
+	}
+	if err := gdit.ValidateInstanceName(name); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	if !yes {
+		confirmed, confirmCode := confirm("remove instance "+name+"?", `remove requires confirmation; use "gdit remove -y <name>" in scripts`, stderr)
+		if !confirmed {
+			return confirmCode
+		}
+	}
+	result, err := manager.RemoveInstance(ctx, name)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed instance %s\n", result.Instance.Name)
+	writeOrphans(stdout, stderr, result.Orphans)
+	return 0
+}
+
+func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			return usage(stderr, "gdit engine [list]")
+		}
+		versions, err := manager.List(ctx)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		refs, err := referencedEngines(ctx, manager)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		for _, version := range versions {
+			status := "orphan"
+			if refs[version.ID] {
+				status = "referenced"
+			}
+			fmt.Fprintf(stdout, "%s\t%s/%s\t%s\t%s\n", version.ID, version.Target.OS, version.Target.Arch, version.Source, status)
+		}
+		return 0
+	}
+	switch args[0] {
+	case "install":
+		return runEngineInstall(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "remove":
+		versionArg, yes, code := parseConfirmedTarget(args[1:], "gdit engine remove [-y|--yes] <version>", stderr)
+		if code != 0 {
+			return code
+		}
+		// 接受资产 ID（如 4.5.2-dotnet，与 engine list 输出一致）或版本输入（4.5.2 / m4.5.2）。
+		id := versionArg
+		if !gdit.ValidEngineID(id) {
+			version, edition, err := gdit.ParseVersionArg(versionArg)
+			if err != nil {
+				writeError(stderr, err)
+				return 1
+			}
+			id = version + "-" + edition
+		}
+		if !yes {
+			confirmed, confirmCode := confirm("remove engine "+id+"?", `engine remove requires confirmation; use -y in scripts`, stderr)
+			if !confirmed {
+				return confirmCode
+			}
+		}
+		if err := manager.Remove(ctx, id); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "removed engine %s\n", id)
+		return 0
+	default:
+		writeErrorf(stderr, "unknown engine command %q", args[0])
+		return 2
+	}
+}
+
+func runEngineInstall(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	flags := flag.NewFlagSet("engine install", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	edition := flags.String("edition", "standard", "standard 或 dotnet")
+	flags.StringVar(edition, "e", "standard", "简写")
+	source := flags.String("source", "", "来源名")
+	flags.StringVar(source, "s", "", "简写")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
 		return 2
 	}
 	if flags.NArg() == 0 {
-		if *sourceName != "" {
-			if code := checkSourceArgument(ctx, stdout, stderr, manager, *sourceName); code != 0 {
-				return code
-			}
+		return usage(stderr, "gdit engine install [options] <version>...")
+	}
+	for _, arg := range flags.Args() {
+		if strings.HasPrefix(arg, "-") {
+			fmt.Fprintln(stderr, `flags must be placed before versions, e.g. "gdit engine install --edition dotnet 4.5.2"`)
+			return 2
 		}
-		return runInteractiveInstall(ctx, stdout, stderr, manager, renderer, *edition, *sourceName)
 	}
 	explicitEdition := false
-	flags.Visit(func(visited *flag.Flag) {
-		if visited.Name == "edition" || visited.Name == "e" {
-			explicitEdition = true
-		}
-	})
-	for _, versionArg := range flags.Args() {
-		if strings.HasPrefix(versionArg, "m") && explicitEdition {
+	flags.Visit(func(item *flag.Flag) { explicitEdition = explicitEdition || item.Name == "edition" || item.Name == "e" })
+	for _, arg := range flags.Args() {
+		if strings.HasPrefix(arg, "m") && explicitEdition {
 			fmt.Fprintln(stderr, `the "m" version prefix cannot be combined with --edition`)
 			return 2
 		}
 	}
-	// 多版本参数逐个串行安装：每个版本独立解析与执行，任一失败不中断其余，
-	// 最终按是否有失败汇总退出码。
 	failed := false
-	for _, versionArg := range flags.Args() {
-		version, parsedEdition, err := gdit.ParseVersionArg(versionArg)
+	for _, arg := range flags.Args() {
+		version, parsedEdition, err := gdit.ParseVersionArg(arg)
 		if err != nil {
-			renderer.clearLine()
-			fmt.Fprintln(stderr, err)
+			writeError(stderr, err)
 			failed = true
 			continue
 		}
-		requestEdition := *edition
-		if strings.HasPrefix(versionArg, "m") {
-			requestEdition = parsedEdition
+		selectedEdition := *edition
+		if strings.HasPrefix(arg, "m") {
+			selectedEdition = parsedEdition
 		}
-		result, err := manager.Install(ctx, gdit.InstallRequest{Version: version, Edition: requestEdition, Source: *sourceName})
+		result, err := manager.Install(ctx, gdit.InstallRequest{Version: version, Edition: selectedEdition, Source: *source})
 		if err != nil {
-			renderer.clearLine()
-			fmt.Fprintln(stderr, err)
+			clearProgress(renderer)
+			writeError(stderr, err)
 			failed = true
 			continue
 		}
-		fmt.Fprintf(stdout, "installed %s\n", result.Version.ID)
-		if result.StateRebuildRequired {
-			fmt.Fprintln(stderr, "warning: state index will be rebuilt on the next read")
-		}
+		fmt.Fprintf(stdout, "installed engine %s\n", result.Version.ID)
+		writeStateWarning(stderr, result.StateRebuildRequired)
 	}
 	if failed {
 		return 1
@@ -218,191 +527,372 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer, ma
 	return 0
 }
 
-// runInteractiveInstall 在终端下依次选择 edition、version 和 source 后安装。
-// 非 TTY 环境返回用法错误，避免脚本卡死。交互提示一律渲染到 stderr。
-func runInteractiveInstall(ctx context.Context, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer, defaultEdition, defaultSource string) int {
-	if !stdinIsTTY() {
-		fmt.Fprintln(stderr, "interactive install requires a terminal; use: gdit install [--edition standard|dotnet] [--source <name>] <version>")
+func runSDK(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			return usage(stderr, "gdit sdk [list]")
+		}
+		items, err := manager.SDKs(ctx)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		for _, item := range items {
+			fmt.Fprintf(stdout, "%s\t%s\t%s\n", item.Version, item.Kind, item.Path)
+		}
+		return 0
+	}
+	switch args[0] {
+	case "available":
+		if len(args) != 1 {
+			return usage(stderr, "gdit sdk available")
+		}
+		channels, err := manager.AvailableSDKs(ctx)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		for _, channel := range channels {
+			fmt.Fprintf(stdout, "%s:\n", sdkChannelLabel(channel))
+			for _, version := range channel.Versions {
+				fmt.Fprintf(stdout, "  %s\n", version)
+			}
+		}
+		return 0
+	case "install":
+		if len(args) == 1 {
+			return runInteractiveSDKInstall(ctx, stdout, stderr, manager, renderer)
+		}
+		if len(args) != 2 {
+			return usage(stderr, "gdit sdk install <version>")
+		}
+		result, err := manager.InstallSDK(ctx, args[1])
+		if err != nil {
+			clearProgress(renderer)
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "installed sdk %s\n", result.SDK.Version)
+		writeStateWarning(stderr, result.StateRebuildRequired)
+		return 0
+	case "remove":
+		version, yes, code := parseConfirmedTarget(args[1:], "gdit sdk remove [-y|--yes] <version>", stderr)
+		if code != 0 {
+			return code
+		}
+		if !yes {
+			confirmed, confirmCode := confirm("remove SDK "+version+"?", `sdk remove requires confirmation; use -y in scripts`, stderr)
+			if !confirmed {
+				return confirmCode
+			}
+		}
+		if err := manager.RemoveSDK(ctx, version); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "removed sdk %s\n", version)
+		return 0
+	default:
+		writeErrorf(stderr, "unknown sdk command %q", args[0])
 		return 2
 	}
-	var edition string
-	if err := askInteractive(&survey.Select{
-		Message: "选择 edition",
-		Options: []string{"standard", "dotnet"},
-		Default: defaultEdition,
-	}, &edition); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+}
+
+// sdkChannelLabel 生成 SDK 通道展示文本：如 "10.0 (LTS)"、"11.0 (Preview)"、"6.0 (EOL)"。
+func sdkChannelLabel(channel gdit.SDKChannel) string {
+	switch channel.Phase {
+	case "eol":
+		return channel.MajorMinor + " (EOL)"
+	case "preview":
+		return channel.MajorMinor + " (Preview)"
 	}
-	versions, err := manager.Available(ctx, "")
-	if err != nil {
-		fmt.Fprintf(stderr, "warning: 无法枚举可用版本：%v\n", err)
-		versions = nil
+	if channel.ReleaseType != "" {
+		return channel.MajorMinor + " (" + strings.ToUpper(channel.ReleaseType) + ")"
 	}
-	var version string
-	options := make([]string, 0, len(versions))
-	for _, item := range versions {
-		for _, candidate := range item.Editions {
-			if candidate == edition {
-				options = append(options, item.Version)
-				break
-			}
+	return channel.MajorMinor
+}
+
+// askSDKVersion 交互式选择 SDK 版本：先选大版本通道，再选具体 patch；
+// 枚举失败降级为文本输入（与条目安装的降级一致）。
+func askSDKVersion(ctx context.Context, manager managerAPI, stderr io.Writer, target *string) error {
+	stop := startSpinner(stderr, "正在枚举可用 SDK…")
+	channels, enumErr := manager.AvailableSDKs(ctx)
+	stop()
+	if enumErr != nil || len(channels) == 0 {
+		if enumErr != nil {
+			fmt.Fprintf(stderr, "warning: 无法枚举可用 SDK：%v\n", enumErr)
+		}
+		return askInteractive(&survey.Input{Message: "输入 SDK 版本（如 8.0.410）"}, target, survey.WithValidator(versionValidator))
+	}
+	labels := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		labels = append(labels, sdkChannelLabel(channel))
+	}
+	picked := ""
+	if err := askInteractive(&survey.Select{Message: "选择 SDK 大版本", Options: labels}, &picked); err != nil {
+		return err
+	}
+	var versions []string
+	for index, channel := range channels {
+		if labels[index] == picked {
+			versions = channel.Versions
+			break
 		}
 	}
-	if len(options) > 0 {
-		if err := askInteractive(&survey.Select{
-			Message: "选择版本",
-			Options: options,
-		}, &version); err != nil {
-			fmt.Fprintln(stderr, err)
+	if len(versions) == 0 {
+		return fmt.Errorf("SDK 通道 %s 无可用稳定版本", picked)
+	}
+	return askInteractive(&survey.Select{Message: "选择 SDK 版本", Options: versions}, target)
+}
+
+// runInteractiveSDKInstall 在 TTY 下枚举可选 SDK 版本供选择后安装；非 TTY 无参数报用法错误。
+// 枚举失败降级为文本输入（与条目安装的降级一致）。
+func runInteractiveSDKInstall(ctx context.Context, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	if !stdinIsTTY() {
+		fmt.Fprintln(stderr, `interactive sdk install requires a terminal; use: gdit sdk install <version>`)
+		return 2
+	}
+	selected := ""
+	if err := askSDKVersion(ctx, manager, stderr, &selected); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	result, err := manager.InstallSDK(ctx, selected)
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "installed sdk %s\n", result.SDK.Version)
+	writeStateWarning(stderr, result.StateRebuildRequired)
+	return 0
+}
+
+func runEnv(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	instanceName, remaining, ok := extractInstanceFlag(args, stderr)
+	if !ok {
+		return 2
+	}
+	if len(remaining) == 0 {
+		view, err := manager.EffectiveEnv(ctx, instanceName)
+		if err != nil {
+			writeError(stderr, err)
 			return 1
 		}
-	} else {
-		if err := askInteractive(&survey.Input{
-			Message: "输入版本号（如 4.5.2）",
-		}, &version, survey.WithValidator(versionValidator)); err != nil {
-			fmt.Fprintln(stderr, err)
+		for _, variable := range view.Vars {
+			fmt.Fprintf(stdout, "%s=%s\t%s\n", variable.Key, variable.Value, variable.Origin)
+		}
+		if len(view.Args) > 0 {
+			fmt.Fprintf(stdout, "args\t%s\n", strings.Join(view.Args, " "))
+		}
+		return 0
+	}
+	switch remaining[0] {
+	case "set":
+		if len(remaining) != 2 {
+			return usage(stderr, "gdit env set <KEY=VALUE> [--instance <name>]")
+		}
+		key, value, found := strings.Cut(remaining[1], "=")
+		if !found {
+			return usage(stderr, "gdit env set <KEY=VALUE> [--instance <name>]")
+		}
+		if err := manager.SetEnvVar(ctx, instanceName, key, value); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "set %s\n", key)
+		return 0
+	case "unset":
+		if len(remaining) != 2 {
+			return usage(stderr, "gdit env unset <KEY> [--instance <name>]")
+		}
+		if err := manager.UnsetEnvVar(ctx, instanceName, remaining[1]); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "unset %s\n", remaining[1])
+		return 0
+	default:
+		return usage(stderr, "gdit env [--instance <name>] | set|unset ...")
+	}
+}
+
+func runAutoRemove(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	flags := flag.NewFlagSet("autoremove", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	yes := flags.Bool("y", false, "跳过确认")
+	flags.BoolVar(yes, "yes", false, "跳过确认")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 0 {
+		return usage(stderr, "gdit autoremove [-y|--yes]")
+	}
+	orphans, err := manager.Orphans(ctx)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	if len(orphans) == 0 {
+		fmt.Fprintln(stdout, "no orphan assets")
+		return 0
+	}
+	writeOrphans(stdout, stderr, orphans)
+	if !*yes {
+		confirmed, confirmCode := confirm("remove these orphan assets?", `autoremove requires confirmation; use "gdit autoremove -y" in scripts`, stderr)
+		if !confirmed {
+			return confirmCode
+		}
+	}
+	result, err := manager.AutoRemove(ctx)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	for _, item := range result.Removed {
+		fmt.Fprintf(stdout, "removed %s %s\n", item.Kind, item.ID)
+	}
+	writeStateWarning(stderr, result.StateRebuildRequired)
+	return 0
+}
+
+func runRun(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	var name string
+	var engineArgs []string
+	separator := -1
+	for index, arg := range args {
+		if arg == "--" {
+			separator = index
+			break
+		}
+	}
+	front := args
+	if separator >= 0 {
+		front, engineArgs = args[:separator], args[separator+1:]
+	}
+	if len(front) > 1 || len(front) == 1 && strings.HasPrefix(front[0], "-") && front[0] != "-d" {
+		return usage(stderr, "gdit run [<name>|-d] [-- <engine args>]")
+	}
+	if len(front) == 1 && front[0] != "-d" {
+		name = front[0]
+		if err := gdit.ValidateInstanceName(name); err != nil {
+			writeError(stderr, err)
 			return 1
 		}
 	}
-	infos, err := manager.Sources(ctx)
-	sourceOptions := []string{"auto（按顺序 fallback）"}
-	if err == nil {
-		for _, info := range infos {
-			if !info.Disabled {
-				sourceOptions = append(sourceOptions, info.Name)
-			}
+	if len(front) == 0 && stdinIsTTY() {
+		// 无参数 + TTY：多条目时交互选择；唯一条目直接启动；零条目给创建指引。
+		instances, listErr := manager.Instances(ctx)
+		if listErr != nil {
+			writeError(stderr, listErr)
+			return 1
 		}
-	} else {
-		fmt.Fprintf(stderr, "warning: 无法读取来源列表：%v\n", err)
+		switch {
+		case len(instances) > 1:
+			picked, pickErr := pickRunInstance(instances, stderr)
+			if pickErr != nil {
+				writeError(stderr, pickErr)
+				return 1
+			}
+			name = picked
+		case len(instances) == 1:
+			name = instances[0].Name
+		default:
+			fmt.Fprintln(stderr, `no instances yet; create one with "gdit install" first`)
+			return 1
+		}
 	}
-	var source string
-	if err := askInteractive(&survey.Select{
-		Message: "选择来源",
-		Options: sourceOptions,
-		Default: defaultSourceChoice(defaultSource, sourceOptions),
-	}, &source); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	requestSource := ""
-	if source != sourceOptions[0] {
-		requestSource = source
-	}
-	result, err := manager.Install(ctx, gdit.InstallRequest{Version: version, Edition: edition, Source: requestSource})
+	target, err := manager.ResolveLaunch(ctx, name)
 	if err != nil {
-		renderer.clearLine()
-		fmt.Fprintln(stderr, err)
+		writeDefaultError(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed %s\n", result.Version.ID)
-	if result.StateRebuildRequired {
-		fmt.Fprintln(stderr, "warning: state index will be rebuilt on the next read")
+	arguments := append(append([]string{}, target.Args...), engineArgs...)
+	return spawnProcess(target.Executable, arguments, target.Env, stdout, stderr)
+}
+
+// pickRunInstance 在 TTY 下列出全部条目供选择，返回选中条目的显示名。
+// 选项带引擎/edition/当前标记，当前条目标注「（当前）」。
+func pickRunInstance(instances []gdit.InstanceInfo, stderr io.Writer) (string, error) {
+	labels := make([]string, 0, len(instances))
+	byLabel := make(map[string]string, len(instances))
+	for _, item := range instances {
+		label := item.Name
+		if item.Current {
+			label += "（当前）"
+		}
+		labels = append(labels, label)
+		byLabel[label] = item.Name
+	}
+	selected := ""
+	if err := askInteractive(&survey.Select{Message: "选择要启动的条目", Options: labels}, &selected); err != nil {
+		return "", err
+	}
+	return byLabel[selected], nil
+}
+
+func runShim(ctx context.Context, args []string, stderr io.Writer, manager managerAPI) int {
+	target, err := manager.ResolveLaunch(ctx, "")
+	if err != nil {
+		writeDefaultError(stderr, err)
+		return 1
+	}
+	arguments := append(append([]string{}, target.Args...), args...)
+	if err := replaceProcess(target.Executable, arguments, target.Env); err != nil {
+		writeErrorf(stderr, "launch %s: %v", target.Executable, err)
+		return 1
 	}
 	return 0
 }
 
-// checkSourceArgument 校验显式 --source 在交互流程前存在且未被禁用，
-// 让用户在选择阶段之前就得到明确的配置错误，而不是静默回退到 auto。
-func checkSourceArgument(ctx context.Context, stdout, stderr io.Writer, manager managerAPI, name string) int {
-	infos, err := manager.Sources(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	for _, info := range infos {
-		if info.Name == name {
-			if info.Disabled {
-				fmt.Fprintf(stderr, "invalid config: source %q is disabled\n", name)
-				return 1
-			}
-			return 0
-		}
-	}
-	fmt.Fprintf(stderr, "invalid config: source %q is not configured\n", name)
-	return 1
-}
-
-// versionValidator 校验用户手动输入的版本号格式，复用 core 的版本语法。
-// 交互流程已先选择 edition，因此拒绝 m 前缀（带 m 会命中 core 的语法错误）。
-func versionValidator(answer interface{}) error {
-	value := strings.TrimSpace(fmt.Sprint(answer))
-	if strings.HasPrefix(value, "m") {
-		return fmt.Errorf("version must be MAJOR.MINOR.PATCH")
-	}
-	return gdit.ValidateVersion(value)
-}
-
-func defaultSourceChoice(defaultSource string, options []string) string {
-	if defaultSource == "" {
-		return options[0]
-	}
-	for _, option := range options {
-		if option == defaultSource {
-			return option
-		}
-	}
-	return options[0]
-}
-
 func runSource(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	if len(args) == 0 {
-		return listSources(ctx, stdout, stderr, manager)
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			return usage(stderr, "gdit source [list]")
+		}
+		items, err := manager.Sources(ctx)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		for index, item := range items {
+			status := ""
+			if item.Disabled {
+				status = "\tdisabled"
+			}
+			fmt.Fprintf(stdout, "%d\t%s\t%s%s\n", index+1, item.Name, item.Kind, status)
+		}
+		return 0
+	}
+	if len(args) != 2 {
+		return usage(stderr, "gdit source use|ban|unban <name>")
+	}
+	var err error
+	switch args[0] {
+	case "use":
+		err = manager.SetDefaultSource(ctx, args[1])
+	case "ban":
+		err = manager.SetSourceDisabled(ctx, args[1], true)
+	case "unban":
+		err = manager.SetSourceDisabled(ctx, args[1], false)
+	default:
+		return usage(stderr, "gdit source use|ban|unban <name>")
+	}
+	if err != nil {
+		writeError(stderr, err)
+		return 1
 	}
 	switch args[0] {
-	case "list":
-		return listSources(ctx, stdout, stderr, manager)
 	case "use":
-		if len(args) != 2 {
-			fmt.Fprintln(stderr, "usage: gdit source use <name>")
-			return 2
-		}
-		if err := manager.SetDefaultSource(ctx, args[1]); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		fmt.Fprintf(stdout, "default source is now %s\n", args[1])
-		return 0
 	case "ban":
-		if len(args) != 2 {
-			fmt.Fprintln(stderr, "usage: gdit source ban <name>")
-			return 2
-		}
-		if err := manager.SetSourceDisabled(ctx, args[1], true); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		fmt.Fprintf(stdout, "source %s is disabled\n", args[1])
-		return 0
 	case "unban":
-		if len(args) != 2 {
-			fmt.Fprintln(stderr, "usage: gdit source unban <name>")
-			return 2
-		}
-		if err := manager.SetSourceDisabled(ctx, args[1], false); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		fmt.Fprintf(stdout, "source %s is enabled\n", args[1])
-		return 0
-	default:
-		fmt.Fprintf(stderr, "unknown source command %q\n", args[0])
-		return 2
-	}
-}
-
-func listSources(ctx context.Context, stdout, stderr io.Writer, manager managerAPI) int {
-	sources, err := manager.Sources(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	for index, source := range sources {
-		status := ""
-		if source.Disabled {
-			status = "\tdisabled"
-		}
-		fmt.Fprintf(stdout, "%d\t%s\t%s%s\n", index+1, source.Name, source.Kind, status)
 	}
 	return 0
 }
@@ -410,290 +900,240 @@ func listSources(ctx context.Context, stdout, stderr io.Writer, manager managerA
 func runAvailable(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
 	flags := flag.NewFlagSet("available", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	sourceName := flags.String("source", "", "source name; empty uses the configured order")
-	flags.StringVar(sourceName, "s", "", "shorthand for --source")
-	if err := flags.Parse(args); err != nil {
+	source := flags.String("source", "", "来源名")
+	flags.StringVar(source, "s", "", "简写")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
 		return 2
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: gdit available [--source <name>]")
-		return 2
+		return usage(stderr, "gdit available [--source <name>]")
 	}
-	versions, err := manager.Available(ctx, *sourceName)
+	stop := startSpinner(stderr, "正在枚举可用版本…")
+	channels, err := manager.Available(ctx, *source)
+	stop()
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeError(stderr, err)
 		return 1
 	}
-	for _, version := range versions {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", version.Version, strings.Join(version.Editions, ","), strings.Join(version.Sources, ","))
-	}
-	return 0
-}
-
-func runList(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	if len(args) != 0 {
-		fmt.Fprintln(stderr, "usage: gdit list")
-		return 2
-	}
-	versions, err := manager.List(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	// 读取默认版本失败（未设置或悬空）时有意降级为不标记任何版本，列表仍完整输出。
-	current := ""
-	if id, err := manager.Default(ctx); err == nil {
-		current = id
-	}
-	for _, version := range versions {
-		line := fmt.Sprintf("%s\t%s/%s\t%s", version.ID, version.Target.OS, version.Target.Arch, version.Source)
-		if version.ID == current {
-			line = defaultLine(line + "\tdefault")
-		}
-		fmt.Fprintln(stdout, line)
-	}
-	return 0
-}
-
-// runShim 处理以 godot 名称启动的分支：解析默认版本后用 execve 替换自身进程，
-// 参数、stdio 和退出码原样透传给引擎。
-func runShim(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	target, err := manager.ResolveLaunch(ctx, "")
-	if err != nil {
-		if errors.Is(err, gdit.ErrNoDefault) {
-			fmt.Fprintln(stderr, `no default version set; run "gdit default <version>" first`)
-		} else {
-			fmt.Fprintln(stderr, err)
-		}
-		return 1
-	}
-	if err := replaceProcess(target.Executable, args); err != nil {
-		fmt.Fprintf(stderr, "launch %s: %v\n", target.Executable, err)
-		return 1
-	}
-	return 0 // 不可达：execve 成功不返回
-}
-
-func runDefault(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	if len(args) > 1 {
-		fmt.Fprintln(stderr, "usage: gdit default [<version>]")
-		return 2
-	}
-	if len(args) == 1 {
-		version, edition, err := gdit.ParseVersionArg(args[0])
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		id := version + "-" + edition
-		if err := manager.SetDefault(ctx, id); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "default: %s\n", id)
-		return 0
-	}
-	id, err := manager.Default(ctx)
-	if err != nil {
-		if errors.Is(err, gdit.ErrNoDefault) {
-			fmt.Fprintln(stderr, `no default version set; run "gdit default <version>" first`)
-		} else {
-			fmt.Fprintln(stderr, err)
-		}
-		return 1
-	}
-	fmt.Fprintf(stdout, "default: %s\n", id)
-	return 0
-}
-
-// runRemove 卸载指定版本。TTY 下默认交互确认（默认否）；非 TTY 下必须显式
-// -y/--yes 跳过确认，避免脚本卡死或误删。交互提示渲染到 stderr。
-func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	flags := flag.NewFlagSet("remove", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	yes := flags.Bool("y", false, "skip confirmation")
-	flags.BoolVar(yes, "yes", false, "skip confirmation")
-	if err := flags.Parse(args); err != nil {
-		return 2
-	}
-	if flags.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: gdit remove [-y|--yes] <version>")
-		return 2
-	}
-	version, edition, err := gdit.ParseVersionArg(flags.Arg(0))
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	id := version + "-" + edition
-	if !*yes {
-		if !stdinIsTTY() {
-			fmt.Fprintln(stderr, `remove requires confirmation; use "gdit remove -y <version>" in scripts`)
-			return 2
-		}
-		var confirmed bool
-		if err := askInteractive(&survey.Confirm{
-			Message: fmt.Sprintf("remove %s?", id),
-			Default: false,
-		}, &confirmed); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if !confirmed {
-			fmt.Fprintln(stderr, "remove cancelled")
-			return 0
+	for _, channel := range channels {
+		fmt.Fprintf(stdout, "%s:\n", channel.Name)
+		for _, item := range channel.Versions {
+			fmt.Fprintf(stdout, "  %s\t%s\t%s\n", item.Version, strings.Join(item.Editions, ","), strings.Join(item.Sources, ","))
 		}
 	}
-	if err := manager.Remove(ctx, id); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "removed %s\n", id)
 	return 0
 }
 
 func runSetup(ctx context.Context, root string, args []string, stdout, stderr io.Writer, manager managerAPI) int {
 	if len(args) != 0 {
-		fmt.Fprintln(stderr, "usage: gdit setup")
-		return 2
+		return usage(stderr, "gdit setup")
 	}
 	if err := manager.Setup(ctx); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeError(stderr, err)
 		return 1
 	}
-	shimPath := filepath.Join(root, "bin", "godot")
-	fmt.Fprintf(stdout, "godot shim ready at %s\n", shimPath)
-	if !pathContainsDir(filepath.Dir(shimPath)) {
-		fmt.Fprintf(stderr, "hint: add %s to PATH to use the godot command\n", filepath.Dir(shimPath))
+	shim := filepath.Join(root, "bin", "godot")
+	fmt.Fprintf(stdout, "godot shim ready at %s\n", shim)
+	if !pathContainsDir(filepath.Dir(shim)) {
+		fmt.Fprintf(stderr, "hint: add %s to PATH to use the godot command\n", filepath.Dir(shim))
 	}
 	return 0
 }
 
-// pathContainsDir 报告目录是否已存在于 PATH 中（忽略尾斜杠等变体）。
 func pathContainsDir(directory string) bool {
 	clean := filepath.Clean(directory)
-	for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
-		if filepath.Clean(entry) == clean {
+	for _, item := range filepath.SplitList(os.Getenv("PATH")) {
+		if filepath.Clean(item) == clean {
 			return true
 		}
 	}
 	return false
 }
 
-// runRun 启动引擎：-d 启动默认版本，<版本> 显式启动指定版本（不改变默认），
-// 无参数且终端可用时交互选择已安装版本后启动。-- 之后的参数原样透传给引擎，
-// 不经过 gdit 解析；stdin/stdout/stderr 和退出码透传。
-func runRun(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
-	defaultVersion := false
-	var positional, engineArgs []string
-	afterSeparator := false
-	for _, arg := range args {
-		if afterSeparator {
-			engineArgs = append(engineArgs, arg)
-			continue
-		}
-		switch arg {
-		case "--":
-			afterSeparator = true
-		case "-d":
-			defaultVersion = true
-		default:
-			positional = append(positional, arg)
-		}
+func parseConfirmedTarget(args []string, usageText string, stderr io.Writer) (string, bool, int) {
+	flags := flag.NewFlagSet("remove", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	yes := flags.Bool("y", false, "跳过确认")
+	flags.BoolVar(yes, "yes", false, "跳过确认")
+	// 允许 -y/--yes 出现在位置参数之后：先抽取确认 flag，其余交给标准解析。
+	reordered, yesAfter := extractYesFlags(args)
+	if err := flags.Parse(reordered); err != nil || flags.NArg() != 1 {
+		return "", false, usage(stderr, usageText)
 	}
-	if len(positional) > 1 {
-		fmt.Fprintln(stderr, "usage: gdit run [-d|<version>] [-- <engine args>]")
-		return 2
-	}
-	if defaultVersion && len(positional) == 1 {
-		fmt.Fprintln(stderr, "cannot combine -d with a version")
-		return 2
-	}
-	if len(positional) == 1 && strings.HasPrefix(positional[0], "-") {
-		fmt.Fprintf(stderr, "unexpected flag %q; engine arguments must come after \"--\"\n", positional[0])
-		return 2
-	}
-	id := ""
-	switch {
-	case defaultVersion:
-	case len(positional) == 1:
-		version, edition, err := gdit.ParseVersionArg(positional[0])
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		id = version + "-" + edition
-	default:
-		if len(engineArgs) > 0 {
-			// 带参数但未指定版本：等价于 -d，启动默认版本。
-		} else if !stdinIsTTY() {
-			fmt.Fprintln(stderr, "interactive run requires a terminal; use: gdit run -d or gdit run <version>")
-			return 2
-		} else {
-			id = interactiveRunVersion(ctx, stderr, manager)
-			if id == "" {
-				return 1
-			}
-		}
-	}
-	target, err := manager.ResolveLaunch(ctx, id)
-	if err != nil {
-		if errors.Is(err, gdit.ErrNoDefault) {
-			fmt.Fprintln(stderr, `no default version set; run "gdit default <version>" first`)
-		} else {
-			fmt.Fprintln(stderr, err)
-		}
-		return 1
-	}
-	return spawnProcess(target.Executable, engineArgs, stdout, stderr)
+	return flags.Arg(0), yesAfter || *yes, 0
 }
 
-// interactiveRunVersion 在终端下列出已安装版本（标记当前默认）供选择，返回选中的版本 ID。
-// 交互失败或没有已安装版本时输出错误并返回空字符串。交互提示渲染到 stderr。
-func interactiveRunVersion(ctx context.Context, stderr io.Writer, manager managerAPI) string {
-	versions, err := manager.List(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return ""
-	}
-	if len(versions) == 0 {
-		fmt.Fprintln(stderr, `no versions installed; run "gdit install" first`)
-		return ""
-	}
-	// 读取默认版本失败时有意降级为不标记任何版本，交互仍可用。
-	current, _ := manager.Default(ctx)
-	options := make([]string, 0, len(versions))
-	for _, version := range versions {
-		label := version.ID
-		if version.ID == current {
-			label += "（当前默认）"
+// extractYesFlags 从参数列表中抽取 -y/--yes（允许出现在任意位置），返回剩余参数与是否出现。
+func extractYesFlags(args []string) ([]string, bool) {
+	result := make([]string, 0, len(args))
+	yes := false
+	for _, arg := range args {
+		if arg == "-y" || arg == "--yes" {
+			yes = true
+			continue
 		}
-		options = append(options, label)
+		result = append(result, arg)
 	}
-	defaultChoice := ""
-	if current != "" {
-		defaultChoice = current + "（当前默认）"
+	return result, yes
+}
+
+func confirm(message, nonTTYHint string, stderr io.Writer) (bool, int) {
+	if !stdinIsTTY() {
+		fmt.Fprintln(stderr, nonTTYHint)
+		return false, 1
 	}
-	var choice string
-	if err := askInteractive(&survey.Select{
-		Message: "选择要启动的版本",
-		Options: options,
-		Default: defaultChoice,
-	}, &choice); err != nil {
-		fmt.Fprintln(stderr, err)
-		return ""
+	var confirmed bool
+	if err := askInteractive(&survey.Confirm{Message: message, Default: false}, &confirmed); err != nil {
+		writeError(stderr, err)
+		return false, 1
 	}
-	return strings.TrimSuffix(choice, "（当前默认）")
+	if !confirmed {
+		fmt.Fprintln(stderr, "cancelled")
+		return false, 1
+	}
+	return true, 0
+}
+
+func extractInstanceFlag(args []string, stderr io.Writer) (string, []string, bool) {
+	remaining := make([]string, 0, len(args))
+	name := ""
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--instance" {
+			if index+1 >= len(args) || name != "" {
+				fmt.Fprintln(stderr, "--instance requires one name")
+				return "", nil, false
+			}
+			name = args[index+1]
+			index++
+			continue
+		}
+		if strings.HasPrefix(arg, "--instance=") {
+			if name != "" {
+				fmt.Fprintln(stderr, "--instance requires one name")
+				return "", nil, false
+			}
+			name = strings.TrimPrefix(arg, "--instance=")
+			if name == "" {
+				fmt.Fprintln(stderr, "--instance requires one name")
+				return "", nil, false
+			}
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	return name, remaining, true
+}
+
+func writeOrphans(stdout, stderr io.Writer, items []gdit.OrphanAsset) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintln(stderr, "以下资产已无引用，可用 gdit autoremove 清理")
+	for _, item := range items {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", item.Kind, item.ID, formatBytes(item.Size))
+	}
+}
+
+func referencedEngines(ctx context.Context, manager managerAPI) (map[string]bool, error) {
+	result := make(map[string]bool)
+	items, err := manager.Instances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		result[item.Engine] = true
+	}
+	return result, nil
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func clearProgress(renderer *progressRenderer) {
+	if renderer != nil {
+		renderer.clearLine()
+	}
+}
+
+func writeInstallEntryResult(stdout, stderr io.Writer, result gdit.InstallEntryResult) {
+	if result.Instance.Name != "" {
+		fmt.Fprintf(stdout, "installed instance %s\n", result.Instance.Name)
+	}
+	for _, asset := range result.Installed {
+		fmt.Fprintf(stdout, "installed %s %s\n", asset.Kind, asset.ID)
+	}
+	writeStateWarning(stderr, result.StateRebuildRequired)
+}
+
+func writeStateWarning(stderr io.Writer, required bool) {
+	if required {
+		fmt.Fprintln(stderr, "warning: state index will be rebuilt on the next read")
+	}
+}
+
+// writeError 统一输出错误：TTY 下红色 "error:" 前缀，非 TTY 或 NO_COLOR 时纯文本前缀。
+func writeError(stderr io.Writer, err error) {
+	writeErrorf(stderr, "%v", err)
+}
+
+// writeErrorf 是 writeError 的格式化变体，用于非 error 值但语义为错误的输出。
+func writeErrorf(stderr io.Writer, format string, args ...any) {
+	message := fmt.Sprintf(format, args...)
+	if term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "" {
+		fmt.Fprintf(stderr, "%serror:%s %s\n", ansiRed, ansiReset, message)
+		return
+	}
+	fmt.Fprintf(stderr, "error: %s\n", message)
+}
+
+func writeDefaultError(stderr io.Writer, err error) {
+	if errors.Is(err, gdit.ErrNoDefault) {
+		writeErrorf(stderr, `no current instance set; run "gdit default <name>" first`)
+	} else {
+		writeError(stderr, err)
+	}
+}
+
+func usage(stderr io.Writer, text string) int {
+	fmt.Fprintln(stderr, "usage: "+text)
+	return 2
+}
+
+// parseFlags 解析子命令 flags 并统一 --help/-h 行为：帮助文本写到 stdout（机器输出之外），
+// 返回 (handled, ok)——handled 表示参数含帮助请求或解析失败，ok 表示解析成功。
+func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (handled, ok bool) {
+	flags.Usage = func() {
+		flags.SetOutput(stdout)
+		fmt.Fprintf(stdout, "usage: %s [options]\n", flags.Name())
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return true, true
+		}
+		return true, false
+	}
+	return false, true
 }
 
 func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "usage: gdit <command> [options]")
-	fmt.Fprintln(writer, "commands: install (i), list (l), source (s), available (a), default (d), remove (rm), setup (st), run (r)")
-	fmt.Fprintln(writer, "  install [--edition|-e standard|dotnet] [--source|-s <name>] <version>...")
-	fmt.Fprintln(writer, "  source [list] | use|ban|unban <name>")
-	fmt.Fprintln(writer, "  available [--source|-s <name>]")
-	fmt.Fprintln(writer, "  default [<version>]")
-	fmt.Fprintln(writer, "  remove [-y|--yes] <version>")
-	fmt.Fprintln(writer, "  setup")
-	fmt.Fprintln(writer, "  run [-d|<version>] [-- <engine args>]")
+	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, env (e), autoremove, source (s), available (a), setup (st)")
+	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current]")
+	fmt.Fprintln(writer, "  engine [list] | install [options] <version>... | remove [-y] <version>")
+	fmt.Fprintln(writer, "  sdk [list] | available | install <version> | remove [-y] <version>")
+	fmt.Fprintln(writer, "  env [--instance <name>] | set <KEY=VALUE> [--instance <name>] | unset <KEY> [--instance <name>]")
+	fmt.Fprintln(writer, "  autoremove [-y|--yes]")
+	fmt.Fprintln(writer, "  run [<name>|-d] [-- <engine args>]")
 }
