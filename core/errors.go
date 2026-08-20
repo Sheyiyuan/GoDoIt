@@ -7,28 +7,36 @@ import (
 )
 
 var (
-	// ErrInvalidInput 表示版本或 edition 输入不符合 MVP 语法。
+	// ErrInvalidInput 表示命令输入不符合当前语法或取值约束。
 	ErrInvalidInput = errors.New("invalid input")
 	// ErrInvalidConfig 表示配置文件或来源模板不可用。
 	ErrInvalidConfig = errors.New("invalid config")
 	// ErrUnsupportedPlatform 表示当前平台没有资产映射。
 	ErrUnsupportedPlatform = errors.New("unsupported platform")
-	// ErrAlreadyInstalled 表示目标版本目录已经存在。
+	// ErrAlreadyInstalled 表示目标资产已经完整安装。
 	ErrAlreadyInstalled = errors.New("version already installed")
 	// ErrNoSources 表示没有可供安装的来源。
 	ErrNoSources = errors.New("no sources configured")
 	// ErrAllSourcesUnavailable 表示所有来源都因临时不可用而失败。
 	ErrAllSourcesUnavailable = errors.New("all sources unavailable")
-	// ErrInvalidArchive 表示已校验的压缩包无法安全解压或缺少目标启动文件。
+	// ErrInvalidArchive 表示已校验的引擎或 SDK 压缩包无法安全解压或缺少启动文件。
 	ErrInvalidArchive = errors.New("invalid engine archive")
 	// ErrLocalIO 表示 gdit 用户目录中的本地文件操作失败。
 	ErrLocalIO = errors.New("local I/O failure")
-	// ErrNotInstalled 表示目标版本尚未完整安装。
+	// ErrNotInstalled 表示目标资产尚未完整安装。
 	ErrNotInstalled = errors.New("version not installed")
-	// ErrNoDefault 表示未设置默认版本，或 current 链接悬空、指向的版本已不完整。
+	// ErrEngineNotInstalled 表示启动解析时条目引用的引擎资产缺失。
+	ErrEngineNotInstalled = errors.New("engine not installed")
+	// ErrNoDefault 表示未设置当前条目，或 current 悬空、指向的条目不可用。
 	ErrNoDefault = errors.New("no default version set")
-	// ErrDefaultInUse 表示当前默认版本不能被删除。
-	ErrDefaultInUse = errors.New("cannot remove current default")
+	// ErrInstanceNotFound 表示指定条目不存在。
+	ErrInstanceNotFound = errors.New("instance not found")
+	// ErrCurrentInstanceInUse 表示目标条目是 current，不能删除。
+	ErrCurrentInstanceInUse = errors.New("cannot remove current instance")
+	// ErrNoCompatibleSDK 表示条目策略要求的 SDK 不可用。
+	ErrNoCompatibleSDK = errors.New("compatible SDK not installed")
+	// ErrAssetInUse 表示资产仍被一个或多个条目引用。
+	ErrAssetInUse = errors.New("asset is referenced by an instance")
 )
 
 // SourceUnavailableError 标记来源的连接或资产暂时不可用，允许继续 fallback。

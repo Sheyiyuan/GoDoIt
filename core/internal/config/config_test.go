@@ -242,3 +242,90 @@ checksum_url = "https://mirror.example/{tag}/SHA256SUMS.txt"
 		t.Fatal("expected custom source named like a built-in to be rejected")
 	}
 }
+
+func TestEnvironmentWriteBackPreservesUnknownFields(t *testing.T) {
+	root := t.TempDir()
+	writeConfigFile(t, root, `schema_version = 1
+source_order = ["github"]
+future_option = "keep"
+
+[environment]
+display_driver = "auto"
+input_method = "auto"
+EXISTING = "value"
+`)
+	if err := SetEnvironmentVariable(root, "NEW_VALUE", "added", false); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`future_option = "keep"`, `EXISTING = "value"`, `NEW_VALUE = "added"`} {
+		if !strings.Contains(string(content), expected) {
+			t.Fatalf("missing %q after write-back: %s", expected, content)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidEnvironmentControls(t *testing.T) {
+	root := t.TempDir()
+	writeConfigFile(t, root, `schema_version = 1
+source_order = ["github"]
+[environment]
+display_driver = "invalid"
+`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected invalid display driver to be rejected")
+	}
+}
+
+func TestSetEnvironmentVariableCanUnsetControlKeys(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{DisplayDriverKey, InputMethodKey} {
+		if err := SetEnvironmentVariable(root, key, "auto", false); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+		if err := SetEnvironmentVariable(root, key, "", true); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		if err := SetEnvironmentVariable(root, key, "", true); err != nil {
+			t.Fatalf("repeat unset %s: %v", key, err)
+		}
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Environment[DisplayDriverKey] != "auto" || cfg.Environment[InputMethodKey] != "auto" {
+		t.Fatalf("unset controls did not fall back to defaults: %+v", cfg.Environment)
+	}
+}
+
+func TestSetEnvironmentVariableRejectsInvalidControlValues(t *testing.T) {
+	root := t.TempDir()
+	for _, test := range []struct {
+		key   string
+		value string
+	}{
+		{key: DisplayDriverKey, value: "xorg"},
+		{key: InputMethodKey, value: "ibus"},
+		{key: "BAD=KEY", value: "v"},
+		{key: "BAD\x00KEY", value: "v"},
+		{key: "KEY", value: "bad\x00value"},
+	} {
+		if err := SetEnvironmentVariable(root, test.key, test.value, false); err == nil {
+			t.Fatalf("expected %q=%q to be rejected", test.key, test.value)
+		}
+	}
+	// 写回不应发生：配置保持为空缺省。
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range cfg.Environment {
+		if key != DisplayDriverKey && key != InputMethodKey {
+			t.Fatalf("invalid variable was persisted: %q=%q", key, value)
+		}
+	}
+}

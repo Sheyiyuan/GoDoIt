@@ -31,6 +31,14 @@ func Acquire(ctx context.Context, filename string) (*File, error) {
 		if err == nil {
 			return &File{file: file}, nil
 		}
+		if errors.Is(err, unix.EINTR) {
+			// 信号打断（如 SIGCHLD 以外的异步信号），重试一轮。
+			if ctx.Err() != nil {
+				_ = file.Close()
+				return nil, ctx.Err()
+			}
+			continue
+		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
 			_ = file.Close()
 			return nil, fmt.Errorf("acquire lock: %w", err)
