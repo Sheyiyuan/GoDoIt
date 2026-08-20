@@ -6,7 +6,8 @@
 ## 项目定位
 
 **GoDoIt（中文名：够独特，CLI/包名：gdit）** 是面向 Linux（主）和 macOS（验证）的
-Godot 引擎版本管理器。
+**Godot 引擎启动器与版本管理器**：底层是包管理器（引擎/.NET SDK 资产），上层是启动器
+条目（instances，引用资产 + SDK 策略 + 环境配置）。
 
 口号：**Go! Do It! 不等戈多，自己动手。**
 
@@ -37,11 +38,16 @@ GoDoIt 管理引擎，不管理项目。项目文件只供 `gdit suggest` 显式
 ## 核心约束
 
 1. 所有用户配置和管理数据统一放在 `~/.gdit/`。
-2. `config.toml` 是唯一用户配置；`state.toml` 由 gdit 维护，已安装版本清单不一致时按 `versions/` 重建。
-3. 已安装引擎位于 `~/.gdit/versions/`，当前版本由 `~/.gdit/current` symlink 指向。
-4. `~/.gdit/bin/godot` shim 指向 `gdit`；shim 只读取 current、注入环境、启动引擎，不读取项目、不访问网络。
-5. 下载先进入 `~/.gdit/tmp/`，sha256 校验成功后才原子发布到 versions。
-6. 下载源按 GodotHub → AtomGit → GitHub fallback；sha256 失败不能继续安装。
+2. `config.toml` 是唯一用户配置；`state.toml` 由 gdit 维护，已安装资产清单不一致时按 `engines/`、`sdks/` 重建。
+3. 已安装引擎资产位于 `~/.gdit/engines/`（第二阶段的 `versions/` 语义）；`~/.gdit/current`
+   symlink 第三阶段起指向 `instances/<uuid>.toml` 条目文件（条目显示名存放在文件内，
+   CLI 按显示名寻址，存储标识为 UUID v4，二者分离）。
+4. `~/.gdit/bin/godot` shim 指向 `gdit`；shim 只读取 current 条目、解析引擎与 SDK、注入
+   环境并启动引擎，不读取项目、不访问网络。
+5. 下载先进入 `~/.gdit/tmp/`，按来源声明的摘要（sha256 或 sha512）校验成功后才原子发布
+   到 engines（SDK 同规则发布到 sdks）。
+6. 下载源按 GodotHub → GitHub fallback；AtomGit 独立来源规则确认前不内置（AtomGit 只是
+   GodotHub 资产的下载域名）；摘要失败不能继续安装。
 7. CLI 和 GUI 共享 core，不复制安装、切换、环境、SDK 或来源逻辑。
 8. 环境变量只注入目标子进程，不修改 shell、系统 PATH 或系统 dotnet。
 9. Linux 显示驱动默认自动检测，不统一强制 x11；macOS 不注入 Linux 专用变量。
@@ -56,17 +62,20 @@ GoDoIt/
 │   ├── go.mod
 │   ├── gdit.go
 │   └── internal/
+│       ├── archive/             # zip/tar.gz 安全解压
 │       ├── config/
 │       ├── dotnet/
 │       ├── env/
+│       ├── instance/             # 条目层：实例读写（UUID 标识 + 显示名）、引用扫描、GC 计算
+│       ├── lock/                # 全局修改锁（flock）
 │       ├── platform/
-│       ├── project/             # 仅 suggest 只读分析
+│       ├── project/             # 仅 suggest 只读分析（第五阶段创建）
 │       ├── source/
 │       └── store/
 ├── cli/
 │   ├── go.mod
 │   └── cmd/gdit/
-├── gui/
+├── gui/                         # 第六阶段创建（Wails v2 + React）
 │   ├── go.mod
 │   └── frontend/
 ├── docs/
@@ -92,7 +101,7 @@ GoDoIt/
 - 覆盖安装中断、sha256 失败、fallback、状态清单重建、current 原子切换和 shim 环境注入。
 - 覆盖 `setup` 不修改 shell 配置或系统 PATH，以及 shim 缺少兼容 SDK 时不访问网络。
 - Source 使用固定 fixture 测试，live 网络测试不能替代固定测试。
-- `suggest` 测试必须确认项目目录内容没有变化。
+- `suggest` 测试必须确认项目目录内容没有变化（第五阶段实现 suggest 时生效）。
 - macOS 平台行为需要 Apple Silicon 实机验证，交叉编译不算完成。
 
 ## 工作流
@@ -103,5 +112,5 @@ GoDoIt/
 - 使用 git flow 风格分支和约定式提交。
 - 不改动与当前任务无关的文件。
 
-当前设计状态为 `v0.2 第二阶段实施中`。第二阶段为 `default/remove/setup/run`（见架构文档 §9.4）；
-GodotHub 和 AtomGit 的具体 URL 规则确认前，不把猜测地址写入内置 provider。
+当前实现状态为 `v0.2 第三阶段实施中`（instances 条目层 + 环境注入 + .NET SDK + 资产 GC）。
+前两阶段已交付：install/list/来源管理（第一阶段）、default/remove/setup/run（第二阶段）。
