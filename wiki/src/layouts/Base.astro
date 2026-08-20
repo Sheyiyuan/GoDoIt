@@ -1,0 +1,679 @@
+---
+// 全站外壳负责导航、搜索、主题切换和基础设计变量。
+import { Moon, Search, Sun, X } from '@lucide/astro';
+
+interface Props {
+    title: string;
+    description?: string;
+}
+
+const { title, description } = Astro.props;
+const pathname = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="generator" content={Astro.generator} />
+        <meta name="theme-color" content="#f4f6f3" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <title>{title}</title>
+        {description && <meta name="description" content={description} />}
+        <script is:inline>
+            (() => {
+                const saved = localStorage.getItem("gdit-theme");
+                const preferred = matchMedia("(prefers-color-scheme: dark)")
+                    .matches
+                    ? "dark"
+                    : "light";
+                document.documentElement.dataset.theme = saved || preferred;
+            })();
+        </script>
+        <style is:global>
+            :root {
+                color-scheme: light;
+                --canvas: #f4f6f3;
+                --surface: #ffffff;
+                --surface-subtle: #edf1ee;
+                --surface-raised: #ffffff;
+                --ink: #202522;
+                --ink-soft: #59625d;
+                --ink-faint: #78817c;
+                --line: #d8ded9;
+                --line-strong: #b8c2ba;
+                --accent: #2e759d;
+                --accent-strong: #205b7d;
+                --accent-soft: #e4f1f7;
+                --cyan: #008eb2;
+                --accent-secondary: #6558a4;
+                --accent-secondary-soft: #eeeafb;
+                --success: #317252;
+                --code-surface: #18201c;
+                --code-ink: #e7eee9;
+                --shadow: 0 12px 34px rgba(39, 52, 44, 0.12);
+                --radius-sm: 4px;
+                --radius-md: 7px;
+                --site-width: 1240px;
+                --header-height: 64px;
+            }
+            html[data-theme="dark"] {
+                color-scheme: dark;
+                --canvas: #151815;
+                --surface: #1c211d;
+                --surface-subtle: #242a25;
+                --surface-raised: #202620;
+                --ink: #edf0ec;
+                --ink-soft: #b3bbb5;
+                --ink-faint: #909991;
+                --line: #343b35;
+                --line-strong: #4d584f;
+                --accent: #80c1df;
+                --accent-strong: #a7d8ec;
+                --accent-soft: #203842;
+                --cyan: #59c5dc;
+                --accent-secondary: #b9a9e8;
+                --accent-secondary-soft: #342d49;
+                --success: #86c9a2;
+                --code-surface: #0d110f;
+                --code-ink: #e7eee9;
+                --shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+            }
+            * {
+                box-sizing: border-box;
+            }
+            html {
+                scroll-behavior: smooth;
+                scroll-padding-top: calc(var(--header-height) + 1.5rem);
+                scrollbar-gutter: stable;
+            }
+            body {
+                margin: 0;
+                min-width: 320px;
+                background: var(--canvas);
+                color: var(--ink);
+                font-family:
+                    "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC",
+                    sans-serif;
+                font-size: 16px;
+                line-height: 1.72;
+                letter-spacing: 0;
+            }
+            button,
+            input {
+                font: inherit;
+                letter-spacing: 0;
+            }
+            button,
+            a {
+                -webkit-tap-highlight-color: transparent;
+            }
+            a {
+                color: var(--accent-strong);
+                text-decoration-thickness: 1px;
+                text-underline-offset: 0.18em;
+            }
+            a:hover {
+                color: var(--accent);
+            }
+            :focus-visible {
+                outline: 3px solid
+                    color-mix(in srgb, var(--accent) 50%, transparent);
+                outline-offset: 3px;
+            }
+            ::selection {
+                background: var(--accent-soft);
+                color: var(--ink);
+            }
+            code {
+                font-family:
+                    "JetBrains Mono", "Noto Sans Mono CJK SC", ui-monospace,
+                    monospace;
+                font-size: 0.88em;
+                background: var(--surface-subtle);
+                border: 1px solid var(--line);
+                border-radius: var(--radius-sm);
+                padding: 0.08em 0.34em;
+                word-break: break-word;
+            }
+            pre {
+                margin: 1.25rem 0;
+                background: var(--code-surface);
+                color: var(--code-ink);
+                border: 1px solid
+                    color-mix(in srgb, var(--line-strong) 60%, transparent);
+                border-radius: var(--radius-md);
+                padding: 1rem 1.1rem;
+                overflow-x: auto;
+                line-height: 1.65;
+                tab-size: 4;
+            }
+            pre code {
+                background: none;
+                border: 0;
+                border-radius: 0;
+                color: inherit;
+                padding: 0;
+                word-break: normal;
+            }
+            .skip-link {
+                position: fixed;
+                left: 1rem;
+                top: 0.75rem;
+                z-index: 100;
+                transform: translateY(-160%);
+                background: var(--ink);
+                color: var(--canvas);
+                padding: 0.55rem 0.85rem;
+                border-radius: var(--radius-sm);
+            }
+            .skip-link:focus {
+                transform: translateY(0);
+            }
+            header.site {
+                position: sticky;
+                top: 0;
+                z-index: 30;
+                height: var(--header-height);
+                background: color-mix(in srgb, var(--canvas) 96%, transparent);
+                border-bottom: 1px solid var(--line);
+            }
+            nav.site {
+                width: min(100% - 2rem, var(--site-width));
+                height: 100%;
+                margin: 0 auto;
+                display: flex;
+                align-items: center;
+                gap: 1.15rem;
+            }
+            .brand {
+                display: inline-flex;
+                align-items: center;
+                min-width: 0;
+                color: var(--ink);
+                text-decoration: none;
+            }
+            .brand:hover {
+                color: var(--ink);
+            }
+            .brand img {
+                display: block;
+                flex: 0 0 auto;
+                margin-right: 0.55rem;
+            }
+            .brand-mark {
+                width: 30px;
+                height: 30px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                margin-right: 0.55rem;
+                background: var(--accent-strong);
+                border-radius: var(--radius-sm);
+                color: #fff;
+                font-family: "JetBrains Mono", ui-monospace, monospace;
+                font-size: 0.68rem;
+                font-weight: 800;
+            }
+            .brand-name {
+                font-size: 1rem;
+                font-weight: 800;
+            }
+            .site-section {
+                align-self: stretch;
+                display: flex;
+                align-items: center;
+                padding: 0 0.25rem;
+                border-bottom: 2px solid transparent;
+                color: var(--ink-soft);
+                font-size: 0.92rem;
+                font-weight: 650;
+                text-decoration: none;
+            }
+            .site-section[aria-current="page"] {
+                border-bottom-color: var(--accent);
+                color: var(--ink);
+            }
+            .site-spacer {
+                margin-left: auto;
+            }
+            .search-btn {
+                min-height: 38px;
+                min-width: 212px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                background: var(--surface);
+                border: 1px solid var(--line-strong);
+                border-radius: var(--radius-sm);
+                color: var(--ink-soft);
+                padding: 0.38rem 0.55rem 0.38rem 0.7rem;
+                cursor: pointer;
+            }
+            .search-btn:hover {
+                border-color: var(--accent);
+                color: var(--ink);
+            }
+            .search-btn svg {
+                flex: 0 0 auto;
+            }
+            .search-btn kbd {
+                min-width: 2.2rem;
+                background: var(--surface-subtle);
+                border: 1px solid var(--line);
+                border-radius: 3px;
+                color: var(--ink-faint);
+                font-family: inherit;
+                font-size: 0.72rem;
+                line-height: 1.5;
+                padding: 0 0.25rem;
+                text-align: center;
+            }
+            .theme-btn {
+                width: 40px;
+                height: 40px;
+                flex: 0 0 40px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 50%;
+                color: var(--ink-soft);
+                cursor: pointer;
+                font-size: 1rem;
+                line-height: 1;
+            }
+            .theme-btn:hover {
+                background: var(--surface-subtle);
+                border-color: var(--line);
+                color: var(--ink);
+            }
+            .theme-icon {
+                display: block;
+            }
+            html[data-theme="light"] .theme-icon-dark,
+            html[data-theme="dark"] .theme-icon-light {
+                display: none;
+            }
+            #search-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 60;
+                display: none;
+                align-items: flex-start;
+                justify-content: center;
+                background: rgba(12, 16, 13, 0.58);
+                padding: max(8vh, 4rem) 1rem 1rem;
+            }
+            #search-overlay.open {
+                display: flex;
+            }
+            .search-dialog {
+                width: min(680px, 100%);
+                max-height: min(78vh, 760px);
+                overflow: auto;
+                background: var(--surface-raised);
+                border: 1px solid var(--line-strong);
+                border-radius: var(--radius-md);
+                box-shadow: var(--shadow);
+            }
+            .search-head {
+                position: sticky;
+                top: 0;
+                z-index: 1;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                background: var(--surface-raised);
+                border-bottom: 1px solid var(--line);
+                padding: 0.85rem 1rem;
+            }
+            .search-head strong {
+                font-size: 0.92rem;
+            }
+            .search-close {
+                min-width: 44px;
+                min-height: 36px;
+                background: transparent;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-sm);
+                color: var(--ink-soft);
+                cursor: pointer;
+            }
+            .search-close:hover {
+                border-color: var(--accent);
+                color: var(--ink);
+            }
+            .search-close svg {
+                display: block;
+            }
+            #search-box {
+                padding: 0.8rem;
+            }
+            footer.site {
+                margin-top: 5rem;
+                background: var(--surface-subtle);
+                border-top: 1px solid var(--line);
+                color: var(--ink-soft);
+            }
+            .footer-inner {
+                width: min(100% - 2rem, var(--site-width));
+                margin: 0 auto;
+                padding: 2.5rem 0 2rem;
+                display: grid;
+                grid-template-columns: minmax(220px, 1.5fr) repeat(
+                        2,
+                        minmax(150px, 0.75fr)
+                    );
+                gap: 2.5rem;
+            }
+            .footer-mark {
+                margin: 0 0 0.45rem;
+                color: var(--ink);
+                font-size: 1rem;
+                font-weight: 750;
+            }
+            .footer-copy {
+                max-width: 460px;
+                margin: 0;
+                font-size: 0.88rem;
+            }
+            .footer-col h2 {
+                margin: 0 0 0.55rem;
+                color: var(--ink);
+                font-size: 0.8rem;
+                font-weight: 750;
+            }
+            .footer-col ul {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+            .footer-col li + li {
+                margin-top: 0.35rem;
+            }
+            .footer-col a {
+                color: var(--ink-soft);
+                font-size: 0.88rem;
+            }
+            .footer-meta {
+                width: min(100% - 2rem, var(--site-width));
+                margin: 0 auto;
+                border-top: 1px solid var(--line);
+                padding: 1rem 0 1.4rem;
+                font-size: 0.8rem;
+            }
+            @media (max-width: 780px) {
+                :root {
+                    --header-height: 60px;
+                }
+                nav.site {
+                    width: min(100% - 1rem, var(--site-width));
+                    gap: 0.5rem;
+                }
+                .brand-mark {
+                    width: 28px;
+                    height: 28px;
+                    margin-right: 0.4rem;
+                }
+                .brand img {
+                    margin-right: 0.4rem;
+                }
+                .brand-name {
+                    font-size: 0.92rem;
+                }
+                .site-section,
+                .search-btn .label {
+                    display: none;
+                }
+                .search-btn {
+                    min-width: 44px;
+                    width: 44px;
+                    height: 44px;
+                    justify-content: center;
+                    padding: 0;
+                }
+                .search-btn kbd {
+                    display: none;
+                }
+                .footer-inner {
+                    grid-template-columns: 1fr 1fr;
+                    gap: 1.75rem 1rem;
+                }
+                .footer-about {
+                    grid-column: 1 / -1;
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                html {
+                    scroll-behavior: auto;
+                }
+                * {
+                    transition-duration: 0.01ms !important;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <a class="skip-link" href="#main-content">跳到正文</a>
+        <header class="site">
+            <nav class="site" aria-label="主导航">
+                <a class="brand" href="/" aria-label="GoDoIt 首页">
+                    <img
+                        src="/logo.svg"
+                        alt="GoDoIt 图标"
+                        style="height: calc(var(--header-height) / 2); width: auto;"
+                    />
+                    <span class="brand-name">GoDoIt</span>
+                </a>
+
+                <a
+                    class="site-section"
+                    href="/wiki/"
+                    aria-current={pathname.startsWith("/wiki")
+                        ? "page"
+                        : undefined}>Wiki</a
+                >
+                <div class="site-spacer"></div>
+                <button
+                    class="search-btn"
+                    id="search-open"
+                    type="button"
+                    aria-haspopup="dialog"
+                    aria-controls="search-overlay"
+                >
+                    <Search size={16} stroke-width={1.8} aria-hidden="true" />
+                    <span class="label">搜索 Wiki</span>
+                    <kbd aria-hidden="true">/</kbd>
+                </button>
+                <a
+                    class="site-section"
+                    href="https://github.com/Sheyiyuan/GoDoIt"
+                    target="_blank"
+                    rel="noopener">GitHub</a
+                >
+                <button
+                    class="theme-btn"
+                    id="theme-toggle"
+                    type="button"
+                    aria-label="切换到深色外观"
+                    title="切换外观">
+                    <Sun class="theme-icon theme-icon-light" size={17} stroke-width={1.8} aria-hidden="true" />
+                    <Moon class="theme-icon theme-icon-dark" size={17} stroke-width={1.8} aria-hidden="true" />
+                </button
+                >
+            </nav>
+        </header>
+        <div id="search-overlay" aria-hidden="true">
+            <div
+                class="search-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="search-title"
+            >
+                <div class="search-head">
+                    <strong id="search-title">搜索 GoDoIt Wiki</strong>
+                    <button class="search-close" id="search-close" type="button" aria-label="关闭搜索" title="关闭搜索"
+                        ><X size={17} stroke-width={1.8} aria-hidden="true" /></button
+                    >
+                </div>
+                <div id="search-box"></div>
+            </div>
+        </div>
+        <main id="main-content"><slot /></main>
+        <footer class="site">
+            <div class="footer-inner">
+                <div class="footer-about">
+                    <p class="footer-mark">GoDoIt · 够独特</p>
+                    <p class="footer-copy">
+                        面向 Linux 和 macOS 的 Godot 引擎启动器与版本管理器。Go!
+                        Do It! 不等戈多，自己动手。
+                    </p>
+                </div>
+                <div class="footer-col">
+                    <h2>项目</h2>
+                    <ul>
+                        <li>
+                            <a
+                                href="https://github.com/Sheyiyuan/GoDoIt"
+                                target="_blank"
+                                rel="noopener">GitHub 仓库</a
+                            >
+                        </li>
+                        <li>
+                            <a
+                                href="https://github.com/Sheyiyuan/GoDoIt/issues"
+                                target="_blank"
+                                rel="noopener">问题反馈</a
+                            >
+                        </li>
+                        <li><a href="/wiki/">Wiki 总览</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h2>相关资源</h2>
+                    <ul>
+                        <li>
+                            <a
+                                href="https://godotengine.org"
+                                target="_blank"
+                                rel="noopener">Godot 官网</a
+                            >
+                        </li>
+                        <li>
+                            <a
+                                href="https://godothub.com"
+                                target="_blank"
+                                rel="noopener">GodotHub</a
+                            >
+                        </li>
+                        <li>
+                            <a
+                                href="https://dotnet.microsoft.com/zh-cn/download"
+                                target="_blank"
+                                rel="noopener">.NET 下载</a
+                            >
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-meta">AGPL-3.0 · 文档跟随 v0.2 开发分支</div>
+        </footer>
+        <script is:inline>
+            const themeButton = document.getElementById("theme-toggle");
+            function syncThemeButton() {
+                const dark = document.documentElement.dataset.theme === "dark";
+                themeButton.setAttribute(
+                    "aria-label",
+                    dark ? "切换到浅色外观" : "切换到深色外观",
+                );
+            }
+            syncThemeButton();
+            themeButton.addEventListener("click", () => {
+                const next =
+                    document.documentElement.dataset.theme === "dark"
+                        ? "light"
+                        : "dark";
+                document.documentElement.dataset.theme = next;
+                localStorage.setItem("gdit-theme", next);
+                syncThemeButton();
+            });
+
+            const overlay = document.getElementById("search-overlay");
+            const searchBox = document.getElementById("search-box");
+            const openButton = document.getElementById("search-open");
+            const closeButton = document.getElementById("search-close");
+            let uiLoaded = false;
+            let lastFocus = null;
+            function focusSearch() {
+                setTimeout(() => searchBox.querySelector("input")?.focus(), 30);
+            }
+            function loadSearch() {
+                if (uiLoaded) return focusSearch();
+                uiLoaded = true;
+                searchBox.innerHTML =
+                    '<p style="padding:.5rem;color:var(--ink-soft)">正在载入索引…</p>';
+                const css = document.createElement("link");
+                css.rel = "stylesheet";
+                css.href = "/pagefind/pagefind-ui.css";
+                document.head.appendChild(css);
+                const script = document.createElement("script");
+                script.src = "/pagefind/pagefind-ui.js";
+                script.onload = () => {
+                    searchBox.innerHTML = "";
+                    new window.PagefindUI({
+                        element: "#search-box",
+                        showSubResults: true,
+                        translations: { placeholder: "输入命令或问题" },
+                    });
+                    focusSearch();
+                };
+                script.onerror = () => {
+                    searchBox.innerHTML =
+                        '<p style="padding:.5rem;color:var(--ink-soft)">本地开发模式没有搜索索引，请先运行构建并预览 dist。</p>';
+                };
+                document.head.appendChild(script);
+            }
+            function openSearch() {
+                lastFocus = document.activeElement;
+                overlay.classList.add("open");
+                overlay.setAttribute("aria-hidden", "false");
+                document.body.style.overflow = "hidden";
+                loadSearch();
+            }
+            function closeSearch() {
+                if (!overlay.classList.contains("open")) return;
+                overlay.classList.remove("open");
+                overlay.setAttribute("aria-hidden", "true");
+                document.body.style.overflow = "";
+                lastFocus?.focus();
+            }
+            openButton.addEventListener("click", openSearch);
+            closeButton.addEventListener("click", closeSearch);
+            overlay.addEventListener("click", (event) => {
+                if (event.target === overlay) closeSearch();
+            });
+            document.addEventListener("keydown", (event) => {
+                const target = event.target;
+                const editing =
+                    target instanceof HTMLInputElement ||
+                    target instanceof HTMLTextAreaElement;
+                if (
+                    (event.key === "/" && !editing) ||
+                    ((event.ctrlKey || event.metaKey) &&
+                        event.key.toLowerCase() === "k")
+                ) {
+                    event.preventDefault();
+                    overlay.classList.contains("open")
+                        ? closeSearch()
+                        : openSearch();
+                }
+                if (event.key === "Escape") closeSearch();
+            });
+        </script>
+    </body>
+</html>
