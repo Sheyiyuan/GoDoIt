@@ -47,6 +47,19 @@ type managerAPI interface {
 	Doctor(context.Context, bool) (gdit.DoctorReport, error)
 }
 
+type suggestionAPI interface {
+	Suggest(context.Context, string) (gdit.ProjectSuggestion, error)
+	InstallSuggestion(context.Context, gdit.InstallSuggestionRequest) (gdit.InstallSuggestionResult, error)
+}
+
+type templateAPI interface {
+	Templates(context.Context) ([]gdit.TemplateInfo, error)
+	InstallTemplate(context.Context, gdit.InstallTemplateRequest) (gdit.TemplateInfo, error)
+	RemoveTemplate(context.Context, string, string) (gdit.TemplateInfo, error)
+	AttachTemplate(context.Context, string, string) (gdit.TemplateBindingResult, error)
+	DetachTemplate(context.Context, string) (gdit.TemplateBindingResult, error)
+}
+
 var stdinIsTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 var stdoutIsTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 
@@ -142,6 +155,10 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return runEngine(ctx, args[1:], stdout, stderr, manager, renderer)
 	case "sdk":
 		return runSDK(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "template":
+		return runTemplate(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "suggest":
+		return runSuggest(ctx, args[1:], stdout, stderr, manager, renderer)
 	case "env", "e":
 		return runEnv(ctx, args[1:], stdout, stderr, manager)
 	case "autoremove":
@@ -181,6 +198,7 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer, ma
 	sdkVersion := flags.String("sdk-version", "", "托管 SDK 版本")
 	current := flags.Bool("current", false, "设为当前条目")
 	noCurrent := flags.Bool("no-current", false, "不改变 current")
+	includeTemplate := flags.Bool("template", false, "安装并绑定导出模板")
 	handled, ok := parseFlags(flags, args, stdout)
 	if handled {
 		if ok {
@@ -201,7 +219,7 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer, ma
 		value := *current
 		setCurrent = &value
 	}
-	result, err := manager.InstallEntry(ctx, gdit.InstallEntryRequest{Name: name, Version: *version, Edition: *edition, SDKStrategy: *sdk, SDKVersion: *sdkVersion, SetCurrent: setCurrent})
+	result, err := manager.InstallEntry(ctx, gdit.InstallEntryRequest{Name: name, Version: *version, Edition: *edition, SDKStrategy: *sdk, SDKVersion: *sdkVersion, SetCurrent: setCurrent, Template: *includeTemplate})
 	writeInstallEntryResult(stdout, stderr, result)
 	if err != nil {
 		clearProgress(renderer)
@@ -301,6 +319,10 @@ func runInteractiveInstall(ctx context.Context, stdout, stderr io.Writer, manage
 			}
 		}
 	}
+	if err := askInteractive(&survey.Confirm{Message: "安装并绑定导出模板？", Default: false}, &request.Template); err != nil {
+		writeError(stderr, err)
+		return 1
+	}
 	_, currentErr := manager.Default(ctx)
 	if currentErr != nil && !errors.Is(currentErr, gdit.ErrNoDefault) {
 		writeError(stderr, currentErr)
@@ -343,6 +365,13 @@ func runList(ctx context.Context, args []string, stdout, stderr io.Writer, manag
 				line += ":" + item.SDK
 			}
 		}
+		template := item.Template
+		if template == "" {
+			template = "-"
+		} else if item.TemplateMissing {
+			template += ":missing"
+		}
+		line += "\t" + template
 		if item.Current {
 			line = defaultLine(line + "\tcurrent")
 		}
@@ -663,6 +692,246 @@ func runInteractiveSDKInstall(ctx context.Context, stdout, stderr io.Writer, man
 	fmt.Fprintf(stdout, "installed sdk %s\n", result.SDK.Version)
 	writeStateWarning(stderr, result.StateRebuildRequired)
 	return 0
+}
+
+func runTemplate(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	api, ok := manager.(templateAPI)
+	if !ok {
+		writeErrorf(stderr, "template capability is unavailable")
+		return 1
+	}
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			return usage(stderr, "gdit template [list]")
+		}
+		items, err := api.Templates(ctx)
+		if err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		for _, item := range items {
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", item.ID, item.Version, item.Edition, item.Source, formatBytes(item.Size), strings.Join(item.References, ","), item.InstalledAt)
+		}
+		return 0
+	}
+	switch args[0] {
+	case "install":
+		return runTemplateInstall(ctx, args[1:], stdout, stderr, api, renderer)
+	case "remove":
+		return runTemplateRemove(ctx, args[1:], stdout, stderr, api)
+	case "attach":
+		return runTemplateAttach(ctx, args[1:], stdout, stderr, api, renderer)
+	case "detach":
+		return runTemplateDetach(ctx, args[1:], stdout, stderr, api)
+	default:
+		return usage(stderr, "gdit template [list] | install|remove|attach|detach ...")
+	}
+}
+
+func runTemplateInstall(ctx context.Context, args []string, stdout, stderr io.Writer, api templateAPI, renderer *progressRenderer) int {
+	version := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		version, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("template install", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	edition := flags.String("edition", "standard", "standard 或 dotnet")
+	source := flags.String("source", "", "来源名")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
+		return 2
+	}
+	if version == "" && flags.NArg() == 1 {
+		version = flags.Arg(0)
+	} else if flags.NArg() != 0 || version == "" {
+		return usage(stderr, "gdit template install [--edition standard|dotnet] [--source <name>] <version>")
+	}
+	item, err := api.InstallTemplate(ctx, gdit.InstallTemplateRequest{Version: version, Edition: *edition, Source: *source})
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "installed template %s\t%s\n", item.ID, item.Path)
+	return 0
+}
+
+func runTemplateRemove(ctx context.Context, args []string, stdout, stderr io.Writer, api templateAPI) int {
+	flags := flag.NewFlagSet("template remove", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	edition := flags.String("edition", "standard", "standard 或 dotnet")
+	yes := flags.Bool("y", false, "跳过确认")
+	flags.BoolVar(yes, "yes", false, "跳过确认")
+	reordered, yesAfter := extractYesFlags(args)
+	if err := flags.Parse(reordered); err != nil || flags.NArg() != 1 {
+		return usage(stderr, "gdit template remove [-y|--yes] [--edition standard|dotnet] <version>")
+	}
+	if !(*yes || yesAfter) {
+		confirmed, code := confirm("remove template "+flags.Arg(0)+"?", `template remove requires confirmation; use -y in scripts`, stderr)
+		if !confirmed {
+			return code
+		}
+	}
+	item, err := api.RemoveTemplate(ctx, flags.Arg(0), *edition)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed template %s\n", item.ID)
+	return 0
+}
+
+func runTemplateAttach(ctx context.Context, args []string, stdout, stderr io.Writer, api templateAPI, renderer *progressRenderer) int {
+	flags := flag.NewFlagSet("template attach", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	source := flags.String("source", "", "来源名")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 1 {
+		return usage(stderr, "gdit template attach [--source <name>] <name>")
+	}
+	result, err := api.AttachTemplate(ctx, flags.Arg(0), *source)
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "attached template %s to %s\n", result.Template.ID, result.Instance.Name)
+	if result.Installed {
+		fmt.Fprintf(stdout, "installed template %s\t%s\n", result.Template.ID, result.Template.Path)
+	}
+	return 0
+}
+
+func runTemplateDetach(ctx context.Context, args []string, stdout, stderr io.Writer, api templateAPI) int {
+	if len(args) != 1 {
+		return usage(stderr, "gdit template detach <name>")
+	}
+	result, err := api.DetachTemplate(ctx, args[0])
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "detached template from %s\n", result.Instance.Name)
+	writeOrphans(stdout, stderr, result.Orphans)
+	return 0
+}
+
+func runSuggest(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI, renderer *progressRenderer) int {
+	api, ok := manager.(suggestionAPI)
+	if !ok {
+		writeErrorf(stderr, "suggest capability is unavailable")
+		return 1
+	}
+	dir := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		dir, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("suggest", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	install := flags.Bool("install", false, "安装建议条目")
+	name := flags.String("name", "", "条目名")
+	sdk := flags.String("sdk", "", "managed 或 system")
+	sdkVersion := flags.String("sdk-version", "", "托管 SDK 精确版本")
+	current := flags.Bool("current", false, "设为 current")
+	noCurrent := flags.Bool("no-current", false, "不改变 current")
+	noTemplate := flags.Bool("no-template", false, "不安装导出模板")
+	handled, parsed := parseFlags(flags, args, stdout)
+	if handled {
+		if parsed {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() > 1 || dir != "" && flags.NArg() != 0 || *current && *noCurrent {
+		return usage(stderr, "gdit suggest [<project-dir>] [--install --name <name>] [options]")
+	}
+	if dir == "" && flags.NArg() == 1 {
+		dir = flags.Arg(0)
+	}
+	if dir == "" {
+		dir = "."
+	}
+	if !*install && (*name != "" || *sdk != "" || *sdkVersion != "" || *current || *noCurrent || *noTemplate) {
+		return usage(stderr, "suggest install options require --install")
+	}
+	suggestion, err := api.Suggest(ctx, dir)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	writeSuggestion(stdout, stderr, suggestion)
+	if !suggestion.Installable {
+		return 1
+	}
+	installNow := *install
+	if !installNow && stdinIsTTY() {
+		if err := askInteractive(&survey.Confirm{Message: "按建议安装条目和导出模板？", Default: false}, &installNow); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+	}
+	if !installNow {
+		return 0
+	}
+	if *name == "" {
+		if !stdinIsTTY() {
+			return usage(stderr, "gdit suggest <project-dir> --install --name <name>")
+		}
+		if err := askInteractive(&survey.Input{Message: "条目名"}, name, survey.WithValidator(func(answer interface{}) error {
+			return gdit.ValidateInstanceName(strings.TrimSpace(fmt.Sprint(answer)))
+		})); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+	}
+	var setCurrent *bool
+	if *current || *noCurrent {
+		value := *current
+		setCurrent = &value
+	} else if stdinIsTTY() {
+		value := false
+		if err := askInteractive(&survey.Confirm{Message: "设为当前条目？", Default: false}, &value); err != nil {
+			writeError(stderr, err)
+			return 1
+		}
+		setCurrent = &value
+	}
+	includeTemplate := !*noTemplate
+	result, err := api.InstallSuggestion(ctx, gdit.InstallSuggestionRequest{ProjectDir: dir, Name: *name, SDKStrategy: *sdk, SDKVersion: *sdkVersion, SetCurrent: setCurrent, IncludeTemplate: &includeTemplate})
+	writeInstallEntryResult(stdout, stderr, result.Entry)
+	if err != nil {
+		clearProgress(renderer)
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "resolved engine %s\n", result.EngineVersion)
+	if result.Template != nil {
+		fmt.Fprintf(stdout, "template %s\t%s\n", result.Template.ID, result.Template.Path)
+	}
+	return 0
+}
+
+func writeSuggestion(stdout, stderr io.Writer, suggestion gdit.ProjectSuggestion) {
+	fmt.Fprintf(stdout, "project_dir\t%s\nengine_series\t%s\nedition\t%s\nsdk_strategy\t%s\nsdk_version\t%s\nsdk_channel\t%s\n", suggestion.ProjectDir, suggestion.EngineSeries, suggestion.Edition, suggestion.SDKStrategy, suggestion.SDKVersion, suggestion.SDKChannel)
+	for _, item := range suggestion.Evidence {
+		fmt.Fprintf(stdout, "evidence\t%s\t%s\t%s\n", item.Kind, item.Path, item.Value)
+	}
+	for _, item := range suggestion.Diagnostics {
+		fmt.Fprintf(stderr, "%s: %s", item.Level, item.Message)
+		if item.Path != "" {
+			fmt.Fprintf(stderr, " (%s)", item.Path)
+		}
+		fmt.Fprintln(stderr)
+	}
 }
 
 func runEnv(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
@@ -1183,10 +1452,12 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (handled, 
 
 func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "usage: gdit <command> [options]")
-	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, env (e), autoremove, source (s), available (a), setup (st), doctor")
-	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current]")
+	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, template, suggest, env (e), autoremove, source (s), available (a), setup (st), doctor")
+	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current] [--template]")
 	fmt.Fprintln(writer, "  engine [list] | install [options] <version>... | remove [-y] <version>")
 	fmt.Fprintln(writer, "  sdk [list] | available | install <version> | remove [-y] <version>")
+	fmt.Fprintln(writer, "  template [list] | install|remove|attach|detach ...")
+	fmt.Fprintln(writer, "  suggest [<project-dir>] [--install --name <name>] [options]")
 	fmt.Fprintln(writer, "  env [--instance <name>] | set <KEY=VALUE> [--instance <name>] | unset <KEY> [--instance <name>]")
 	fmt.Fprintln(writer, "  autoremove [-y|--yes]")
 	fmt.Fprintln(writer, "  run [<name>|-d] [-- <engine args>]")

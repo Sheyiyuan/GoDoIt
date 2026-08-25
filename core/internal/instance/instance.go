@@ -39,6 +39,11 @@ type Dotnet struct {
 	Version  string `toml:"version,omitempty"`
 }
 
+// Template 描述条目绑定的精确导出模板资产。
+type Template struct {
+	ID string `toml:"id"`
+}
+
 // File 是 instances/<uuid>.toml 的结构。
 type File struct {
 	SchemaVersion int               `toml:"schema_version"`
@@ -46,13 +51,15 @@ type File struct {
 	Name          string            `toml:"name"` // 显示名：CLI 寻址用，唯一，可中文
 	Engine        Engine            `toml:"engine"`
 	Dotnet        *Dotnet           `toml:"dotnet,omitempty"`
+	Template      *Template         `toml:"template,omitempty"`
 	Env           map[string]string `toml:"env,omitempty"`
 }
 
 // References 是条目扫描派生出的资产引用关系，值为引用该资产的条目显示名。
 type References struct {
-	Engines map[string][]string
-	SDKs    map[string][]string
+	Engines   map[string][]string
+	SDKs      map[string][]string
+	Templates map[string][]string
 }
 
 // NewID 生成一个 UUID v4 存储标识符（crypto/rand，零第三方依赖）。
@@ -143,6 +150,12 @@ func Validate(item *File, filename string) error {
 			}
 		default:
 			return errors.New("dotnet strategy must be managed, system or mono")
+		}
+	}
+	if item.Template != nil {
+		expected := item.Engine.Version + "-" + item.Engine.Edition
+		if item.Template.ID != expected {
+			return fmt.Errorf("template id %q must match engine %q", item.Template.ID, expected)
 		}
 	}
 	for key, value := range item.Env {
@@ -291,12 +304,15 @@ func validateEngineReference(root string, item File) error {
 
 // BuildReferences 从已经完整校验的条目集合派生资产引用关系。
 func BuildReferences(items []File) References {
-	refs := References{Engines: make(map[string][]string), SDKs: make(map[string][]string)}
+	refs := References{Engines: make(map[string][]string), SDKs: make(map[string][]string), Templates: make(map[string][]string)}
 	for _, item := range items {
 		engineID := item.Engine.Version + "-" + item.Engine.Edition
 		refs.Engines[engineID] = append(refs.Engines[engineID], item.Name)
 		if item.Dotnet != nil && item.Dotnet.Strategy == "managed" {
 			refs.SDKs[item.Dotnet.Version] = append(refs.SDKs[item.Dotnet.Version], item.Name)
+		}
+		if item.Template != nil {
+			refs.Templates[item.Template.ID] = append(refs.Templates[item.Template.ID], item.Name)
 		}
 	}
 	return refs
@@ -354,6 +370,31 @@ func SetEnv(root, id, key, value string, remove bool) error {
 		delete(content, "env")
 	} else {
 		content["env"] = environment
+	}
+	return store.WriteTOMLAtomic(path, content)
+}
+
+// SetTemplate 原子设置或移除条目模板引用，并保留未知字段。
+func SetTemplate(root, id, templateID string) error {
+	item, err := Read(root, id)
+	if err != nil {
+		return err
+	}
+	if templateID != "" {
+		expected := item.Engine.Version + "-" + item.Engine.Edition
+		if templateID != expected {
+			return fmt.Errorf("template id %q must match engine %q", templateID, expected)
+		}
+	}
+	path := Path(root, id)
+	content := make(map[string]any)
+	if _, err := toml.DecodeFile(path, &content); err != nil {
+		return err
+	}
+	if templateID == "" {
+		delete(content, "template")
+	} else {
+		content["template"] = map[string]any{"id": templateID}
 	}
 	return store.WriteTOMLAtomic(path, content)
 }

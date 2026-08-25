@@ -29,6 +29,7 @@ type InstallEntryRequest struct {
 	SDKStrategy string `json:"sdk_strategy,omitempty"`
 	SDKVersion  string `json:"sdk_version,omitempty"`
 	SetCurrent  *bool  `json:"set_current,omitempty"`
+	Template    bool   `json:"template,omitempty"`
 }
 
 // SourceInfo 描述配置中的一个来源。
@@ -54,9 +55,11 @@ type EngineChannel struct {
 
 // SourceRequest 是 source provider 解析资产时收到的规范化请求。
 type SourceRequest struct {
-	Version string `json:"version"`
-	Edition string `json:"edition"`
-	Target  Target `json:"target"`
+	Kind      string `json:"kind"` // engine 或 template
+	Version   string `json:"version"`
+	Edition   string `json:"edition,omitempty"`
+	AssetName string `json:"asset_name"`
+	Target    Target `json:"target,omitempty"`
 }
 
 // Target 描述当前主机的操作系统和 CPU 架构。
@@ -144,13 +147,15 @@ type SDKChannel struct {
 
 // InstanceInfo 描述一个启动器条目。
 type InstanceInfo struct {
-	ID          string `json:"id"`   // 存储标识符（UUID v4），与条目文件名一致
-	Name        string `json:"name"` // 显示名，用户寻址用，可中文
-	Engine      string `json:"engine"`
-	Edition     string `json:"edition"`
-	SDKStrategy string `json:"sdk_strategy"`
-	SDK         string `json:"sdk"`
-	Current     bool   `json:"current"`
+	ID              string `json:"id"`   // 存储标识符（UUID v4），与条目文件名一致
+	Name            string `json:"name"` // 显示名，用户寻址用，可中文
+	Engine          string `json:"engine"`
+	Edition         string `json:"edition"`
+	SDKStrategy     string `json:"sdk_strategy"`
+	SDK             string `json:"sdk"`
+	Current         bool   `json:"current"`
+	Template        string `json:"template"`
+	TemplateMissing bool   `json:"template_missing"`
 }
 
 // OrphanAsset 描述一个没有条目引用的资产。
@@ -203,4 +208,90 @@ type EnvVar struct {
 type EnvView struct {
 	Vars []EnvVar `json:"vars"`
 	Args []string `json:"args"`
+}
+
+// SuggestLevel 是项目分析诊断的稳定级别。
+type SuggestLevel string
+
+const (
+	// SuggestWarning 表示不阻止安装的项目提示。
+	SuggestWarning SuggestLevel = "warning"
+	// SuggestError 表示阻止建议安装的项目内容错误。
+	SuggestError SuggestLevel = "error"
+)
+
+// SuggestDiagnostic 描述一条可归因于项目内容的诊断。
+type SuggestDiagnostic struct {
+	Level   SuggestLevel `json:"level"`
+	Code    string       `json:"code"`
+	Path    string       `json:"path,omitempty"`
+	Message string       `json:"message"`
+}
+
+// SuggestEvidence 描述项目建议的一项原始证据。
+type SuggestEvidence struct {
+	Kind  string `json:"kind"`
+	Path  string `json:"path"`
+	Value string `json:"value"`
+}
+
+// ProjectSuggestion 是对一次显式项目目录只读分析的完整结果。
+type ProjectSuggestion struct {
+	ProjectDir   string              `json:"project_dir"`
+	EngineSeries string              `json:"engine_series"`
+	Edition      string              `json:"edition"`
+	SDKStrategy  string              `json:"sdk_strategy"`
+	SDKVersion   string              `json:"sdk_version"`
+	SDKChannel   string              `json:"sdk_channel"`
+	Evidence     []SuggestEvidence   `json:"evidence"`
+	Diagnostics  []SuggestDiagnostic `json:"diagnostics"`
+	Installable  bool                `json:"installable"`
+}
+
+// InstallSuggestionRequest 描述一次经用户明确授权的建议安装。
+type InstallSuggestionRequest struct {
+	ProjectDir      string `json:"project_dir"`
+	Name            string `json:"name"`
+	SDKStrategy     string `json:"sdk_strategy,omitempty"`
+	SDKVersion      string `json:"sdk_version,omitempty"`
+	SetCurrent      *bool  `json:"set_current,omitempty"`
+	IncludeTemplate *bool  `json:"include_template,omitempty"`
+}
+
+// InstallSuggestionResult 描述重新分析并安装建议后的确定结果。
+type InstallSuggestionResult struct {
+	Suggestion    ProjectSuggestion  `json:"suggestion"`
+	EngineVersion string             `json:"engine_version"`
+	Entry         InstallEntryResult `json:"entry"`
+	Template      *TemplateInfo      `json:"template,omitempty"`
+}
+
+// TemplateInfo 描述一个完整的官方导出模板资产。
+type TemplateInfo struct {
+	ID                string   `json:"id"`
+	Version           string   `json:"version"`
+	Edition           string   `json:"edition"`
+	Source            string   `json:"source"`
+	ChecksumAlgorithm string   `json:"checksum_algorithm"`
+	Checksum          string   `json:"checksum"`
+	ArchiveName       string   `json:"archive_name"`
+	Path              string   `json:"path"`
+	Size              int64    `json:"size"`
+	InstalledAt       string   `json:"installed_at"`
+	References        []string `json:"references"`
+}
+
+// InstallTemplateRequest 描述一次精确版本导出模板安装。
+type InstallTemplateRequest struct {
+	Version string `json:"version"`
+	Edition string `json:"edition"`
+	Source  string `json:"source,omitempty"`
+}
+
+// TemplateBindingResult 描述条目模板绑定变更及其资产结果。
+type TemplateBindingResult struct {
+	Instance  InstanceInfo  `json:"instance"`
+	Template  *TemplateInfo `json:"template,omitempty"`
+	Installed bool          `json:"installed"`
+	Orphans   []OrphanAsset `json:"orphans,omitempty"`
 }

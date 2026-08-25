@@ -19,7 +19,7 @@ GoDoIt 的所有状态默认在用户级目录 `~/.gdit/` 中。Windows 默认�
 ├── instances/     # 启动器条目：<uuid>.toml，显示名在文件内
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
-├── templates/     # 第五阶段导出模板资产（当前尚未启用）
+├── templates/     # 已验证的导出模板资产
 └── tmp/           # 下载/解压临时目录（中断残留自动清理）
 ```
 

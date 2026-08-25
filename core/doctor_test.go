@@ -430,15 +430,15 @@ func TestDoctorDoesNotAcquireGlobalLock(t *testing.T) {
 
 func TestDoctorDefaultDoesNotProbeSources(t *testing.T) {
 	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+		return response(request, http.StatusOK, nil), nil
+	})}
 	manager, err := New(Options{
-		RootDir:  t.TempDir(),
-		Sources:  []Source{&metadataFixtureSource{name: "fixture", endpoint: server.URL}},
-		SDKProbe: func(context.Context) ([]SDKInfo, error) { return nil, nil },
+		RootDir:    t.TempDir(),
+		HTTPClient: client,
+		Sources:    []Source{&metadataFixtureSource{name: "fixture", endpoint: "https://fixture.invalid/metadata"}},
+		SDKProbe:   func(context.Context) ([]SDKInfo, error) { return nil, nil },
 	})
 	if err != nil {
 		t.Fatal(err)

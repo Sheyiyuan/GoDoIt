@@ -1,13 +1,12 @@
 ---
 title: 开发状态与阶段范围
-description: 当前已经实现的能力，以及第五阶段正在 review 的设计边界。
+description: 当前已经实现的能力，以及后续阶段边界。
 section: reference
 order: 0
 updated: 2026-08-25
 ---
 
-GoDoIt 当前处于 `v0.2`。第四阶段代码已经完成，第五阶段架构正在 review。Wiki 会同时记录
-当前可用能力和下一阶段边界，但只有明确标为“已实现”的命令才能作为当前接口使用。
+GoDoIt 当前处于 `v0.2`。第五阶段代码已经完成，正在进行发布候选验证。
 
 ## 当前已经实现
 
@@ -15,17 +14,17 @@ GoDoIt 当前处于 `v0.2`。第四阶段代码已经完成，第五阶段架构
 - instances 条目、全局 current、`godot` shim 与 `gdit run`
 - managed/system SDK 策略、启动环境合并和资产 GC
 - `gdit doctor` 本地诊断与显式网络探测
+- `gdit suggest` 项目只读分析与明确授权后的建议安装
+- 导出模板安装、绑定、引用保护和孤儿清理
 - Linux amd64 主支持，macOS arm64 与 Windows x86_64 验证级支持
 
 完整命令见 [命令参考](/wiki/reference/commands/)。
 
-## 第五阶段：设计待 review
-
-第五阶段计划加入两组能力，当前二进制中尚不可用。
+## 第五阶段：已实现
 
 ### 项目建议
 
-`gdit suggest [项目目录]` 将只读分析用户明确指定的目录：
+`gdit suggest [项目目录]` 只读分析用户明确指定的目录：
 
 - 读取 `project.godot` 的 `config/features`
 - 可读取同目录 `global.json` 和 `.csproj` 辅助判断 SDK
@@ -36,9 +35,7 @@ GoDoIt 不会保存项目路径、建立项目与条目的持久关联，也不�
 
 ### 导出模板
 
-`gdit template` 将管理与精确 Godot 版本和 edition 匹配的导出模板，并把资产放在
-`~/.gdit/templates/`。模板会复用现有来源、摘要校验、原子发布、引用保护和 `autoremove`
-规则。
+`gdit template` 管理与精确 Godot 版本和 edition 匹配的导出模板，并把资产放在`~/.gdit/templates/`。模板会复用现有来源、摘要校验、原子发布、引用保护和 `autoremove` 规则。
 
 当前设计只管理并展示经过验证的模板资产路径，不修改 Godot 自身的用户目录，也不通过
 `XDG_DATA_HOME` 接管其他 Godot 数据。模板如何无侵入接入 Godot 的自动发现流程仍需上游事实核验。

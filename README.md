@@ -13,8 +13,8 @@
 
 GoDoIt（够独特）是一个简单易用的 Godot 引擎启动器与版本管理器。它把引擎和 .NET SDK 当作可校验、可复用的资产，把启动配置保存为 instances 条目，让 `godot` 在任意目录都启动当前条目。
 
-当前 `v0.2` 第四阶段已经完成，覆盖 `doctor` 与 Linux、macOS、Windows 平台适配。第五阶段
-（只读项目建议 + 导出模板）正在设计 review，相关命令尚未进入当前实现。
+当前 `v0.2` 第五阶段已经完成，覆盖 `suggest` 与导出模板；第四阶段已交付 `doctor` 与
+Linux、macOS、Windows 平台适配。第六阶段将提供 Wails GUI。
 
 ## 为什么用 GoDoIt
 
@@ -58,9 +58,10 @@ godot --editor
 
 完整命令参数见 [`docs/commands.md`](./docs/commands.md)，设计边界以 [`docs/architecture/README.md`](./docs/architecture/README.md) 为准。
 
-第五阶段设计中的命令包括 `gdit suggest [项目目录]` 与 `gdit template ...`。其中 `suggest`
+
+第五阶段命令包括 `gdit suggest [项目目录]` 与 `gdit template ...`。其中 `suggest`
 只会显式、只读分析 `project.godot`、`global.json` 和同目录 `.csproj`，不会保存项目路径、修改
-项目目录或改变 current；在代码落地前不要把这些命令视为可用接口。
+项目目录或隐式改变 current；只有用户确认或显式传入 `--install` 后才进入安装流程。
 
 ## 数据布局
 
@@ -74,7 +75,7 @@ GoDoIt 的用户级数据默认放在 `~/.gdit/`，可用绝对路径环境变�
 ├── instances/        # 启动条目：<uuid>.toml，显示名（可中文）存在文件内
 ├── engines/          # Godot 引擎资产
 ├── sdks/             # 托管 .NET SDK 资产
-├── templates/        # 第五阶段的导出模板资产（当前尚未启用）
+├── templates/        # 已验证的导出模板资产
 └── tmp/              # 下载和解压临时目录
 ```
 
@@ -87,7 +88,8 @@ GoDoIt 的用户级数据默认放在 `~/.gdit/`，可用绝对路径环境变�
 | Windows x86_64 | 验证级支持：`godot.cmd` shim、LockFileEx、MoveFileEx 原子写；WinBoat Windows 11 x86_64 原生验收已通过 |
 
 当前发布候选已经覆盖引擎来源 fallback、SHA-256/SHA-512 校验、instances、环境注入、托管/系统 SDK、
-资产 GC、`doctor` 与三平台适配层。项目建议与导出模板属于设计中的第五阶段，GUI 属于第六阶段。
+
+资产 GC、`doctor`、三平台适配层、项目建议与导出模板。GUI 属于第六阶段。
 
 ## 开发
 

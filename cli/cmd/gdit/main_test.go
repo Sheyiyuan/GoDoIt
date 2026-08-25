@@ -122,6 +122,34 @@ func (f fakeManager) Doctor(context.Context, bool) (gdit.DoctorReport, error) {
 	return f.doctorReport, f.err
 }
 
+type phase5FakeManager struct {
+	fakeManager
+	suggestion gdit.ProjectSuggestion
+	templates  []gdit.TemplateInfo
+}
+
+func (f phase5FakeManager) Suggest(context.Context, string) (gdit.ProjectSuggestion, error) {
+	return f.suggestion, f.err
+}
+func (f phase5FakeManager) InstallSuggestion(context.Context, gdit.InstallSuggestionRequest) (gdit.InstallSuggestionResult, error) {
+	return gdit.InstallSuggestionResult{}, f.err
+}
+func (f phase5FakeManager) Templates(context.Context) ([]gdit.TemplateInfo, error) {
+	return f.templates, f.err
+}
+func (f phase5FakeManager) InstallTemplate(context.Context, gdit.InstallTemplateRequest) (gdit.TemplateInfo, error) {
+	return gdit.TemplateInfo{}, f.err
+}
+func (f phase5FakeManager) RemoveTemplate(context.Context, string, string) (gdit.TemplateInfo, error) {
+	return gdit.TemplateInfo{}, f.err
+}
+func (f phase5FakeManager) AttachTemplate(context.Context, string, string) (gdit.TemplateBindingResult, error) {
+	return gdit.TemplateBindingResult{}, f.err
+}
+func (f phase5FakeManager) DetachTemplate(context.Context, string) (gdit.TemplateBindingResult, error) {
+	return gdit.TemplateBindingResult{}, f.err
+}
+
 func TestInstallParsesEntryFlagsAfterName(t *testing.T) {
 	var request gdit.InstallEntryRequest
 	manager := fakeManager{entryRequest: &request, entryResult: gdit.InstallEntryResult{Instance: gdit.InstanceInfo{Name: "work"}}}
@@ -158,8 +186,24 @@ func TestListWritesInstancesAndCurrentMarker(t *testing.T) {
 		{Name: "csharp", Engine: "4.5.2-dotnet", Edition: "dotnet", SDKStrategy: "managed", SDK: "8.0.410", Current: true},
 	}}
 	stdout, stderr, code := runCommand(t, manager, "list")
-	if code != 0 || stderr != "" || stdout != "work\t4.5.2-standard\tstandard\ncsharp\t4.5.2-dotnet\tdotnet\tmanaged:8.0.410\tcurrent\n" {
+	if code != 0 || stderr != "" || stdout != "work\t4.5.2-standard\tstandard\t-\ncsharp\t4.5.2-dotnet\tdotnet\tmanaged:8.0.410\t-\tcurrent\n" {
 		t.Fatalf("unexpected result: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestSuggestReportsWithoutInstallingInNonTTY(t *testing.T) {
+	manager := phase5FakeManager{suggestion: gdit.ProjectSuggestion{ProjectDir: "/tmp/project", EngineSeries: "4.5", Edition: "standard", Installable: true, Evidence: []gdit.SuggestEvidence{{Kind: "project-feature", Path: "/tmp/project/project.godot", Value: "4.5"}}}}
+	stdout, stderr, code := runCommand(t, manager, "suggest", "/tmp/project")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "engine_series\t4.5") || !strings.Contains(stdout, "evidence\tproject-feature") {
+		t.Fatalf("unexpected suggest result: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestTemplateListWritesStableColumns(t *testing.T) {
+	manager := phase5FakeManager{templates: []gdit.TemplateInfo{{ID: "4.5.2-standard", Version: "4.5.2", Edition: "standard", Source: "fixture", Size: 1024, References: []string{"work"}, InstalledAt: "2026-08-25T00:00:00Z"}}}
+	stdout, stderr, code := runCommand(t, manager, "template", "list")
+	if code != 0 || stderr != "" || stdout != "4.5.2-standard\t4.5.2\tstandard\tfixture\t1.00 KiB\twork\t2026-08-25T00:00:00Z\n" {
+		t.Fatalf("unexpected template list: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 

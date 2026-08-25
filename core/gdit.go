@@ -161,9 +161,11 @@ func (m *Manager) installEngine(ctx context.Context, request InstallRequest, loc
 	defer os.RemoveAll(operation)
 
 	requestForSource := SourceRequest{
-		Version: version,
-		Edition: edition,
-		Target:  Target{OS: target.OS, Arch: target.Arch},
+		Kind:      "engine",
+		Version:   version,
+		Edition:   edition,
+		AssetName: assetName,
+		Target:    Target{OS: target.OS, Arch: target.Arch},
 	}
 	var lastUnavailable error
 	for _, provider := range providers {
@@ -830,9 +832,13 @@ func (a providerAdapter) ListVersions(ctx context.Context) ([]source.VersionInfo
 }
 
 func (a providerAdapter) Resolve(ctx context.Context, request SourceRequest) (Artifact, error) {
-	asset, err := platform.AssetName(request.Version, request.Edition, platform.Target{OS: request.Target.OS, Arch: request.Target.Arch})
-	if err != nil {
-		return Artifact{}, err
+	asset := request.AssetName
+	if asset == "" {
+		var err error
+		asset, err = platform.AssetName(request.Version, request.Edition, platform.Target{OS: request.Target.OS, Arch: request.Target.Arch})
+		if err != nil {
+			return Artifact{}, err
+		}
 	}
 	result, err := a.provider.Resolve(ctx, source.ResolveRequest{Version: request.Version, Edition: request.Edition, AssetName: asset})
 	if err != nil {

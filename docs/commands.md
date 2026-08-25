@@ -1,9 +1,9 @@
 # GoDoIt 命令参考（操作 ↔ 指令）
 
-> 状态：v0.2 第四阶段实现完成、发布候选验证中（doctor + 三平台适配层）
+> 状态：v0.2 第五阶段实现完成、发布候选验证中（suggest + 导出模板）
 > 本文档从用户操作视角列出所有指令与输出约定；设计语义以
 > [`docs/architecture/README.md`](architecture/README.md) 为唯一真理源。
-> 本文记录截至第四阶段的命令面。第三阶段起不保留第二阶段命令兼容层。
+> 本文记录截至第五阶段的命令面。第三阶段起不保留第二阶段命令兼容层。
 
 ## 1. 操作与指令对照
 
@@ -18,7 +18,8 @@
 | 指定托管 SDK | `gdit install work-csharp --version 4.5.2 --edition dotnet --sdk managed --sdk-version 8.0.410` | SDK 版本只接受精确三段版本号 |
 | Godot 3.x mono 条目 | `gdit install old --version 3.6.2 --edition dotnet` | 只下载安装引擎；运行时由系统 Mono 提供，传 `--sdk` 选项报错 |
 | 控制 current | `--current` / `--no-current` | 两者互斥；均未给出时，仅在尚无 current 时把新条目设为当前 |
-| 查看条目 | `gdit list` | 列出名称、引擎、edition、SDK 策略及 current 标记 |
+| 安装并绑定模板 | `gdit install work --version 4.5.2 --template` | 普通安装默认不装模板；交互安装会询问，默认否 |
+| 查看条目 | `gdit list` | 列出名称、引擎、edition、SDK 策略、模板及 current 标记 |
 | 删除条目 | `gdit remove [-y\|--yes] <name>` | 当前条目拒绝删除；删除后提示孤儿资产，不自动删除资产 |
 
 > 命令简写：`install`→`i`、`list`→`l`、`source`→`s`、`available`→`a`、`default`→`d`、
@@ -43,7 +44,7 @@
 | 查看引擎资产 | `gdit engine` / `gdit engine list` | 列出已安装引擎及引用状态 |
 | 安装引擎资产 | `gdit engine install [--edition standard\|dotnet] [--source <name>] <版本>...` | 保留 `m<版本>` 和批量安装语法；不创建条目、不安装 SDK、不改变 current |
 | 删除引擎资产 | `gdit engine remove [-y\|--yes] <版本>` | 接受 `<版本>`（`4.5.2`/`m4.5.2`）或资产 ID（`4.5.2-dotnet`，与 `engine list` 输出一致）；被条目引用时拒绝删除 |
-| 清理孤儿资产 | `gdit autoremove [-y\|--yes]` | 确认后锁内复查并删除仍无引用的引擎/SDK；存在坏条目时不删除任何资产 |
+| 清理孤儿资产 | `gdit autoremove [-y\|--yes]` | 确认后锁内复查并删除仍无引用的引擎/SDK/模板；存在坏条目时不删除任何资产 |
 
 ### 1.4 SDK 与环境
 
@@ -75,7 +76,18 @@
 | 探测指定来源 | `gdit available --source github` | 只用该来源；自定义源（URL 模板型）不支持枚举，返回配置错误 |
 | 探测结果范围 | — | 只列当前平台可安装的版本：两/三段稳定版（如 `4.5.2`、`4.7`）与预发布（如 `4.8-dev3`、`4.7.2-rc1`） |
 
-### 1.7 帮助
+### 1.7 项目建议与导出模板
+
+| 操作 | 指令 | 说明 |
+|---|---|---|
+| 只读分析项目 | `gdit suggest [<项目目录>]` | 只读取同目录 `project.godot`、`global.json` 与 `*.csproj`；默认零网络、零落盘 |
+| 按建议安装 | `gdit suggest <目录> --install --name <条目名>` | 重新分析后解析同系列最高稳定版，默认安装并绑定模板；`--no-template` 跳过 |
+| 查看模板 | `gdit template` / `gdit template list` | 列出版本、edition、来源、大小、引用与已验证 payload 路径 |
+| 安装模板 | `gdit template install [--edition standard\|dotnet] [--source <name>] <版本>` | 校验来源摘要、归档布局和 `version.txt` 后原子发布 |
+| 绑定/解绑 | `gdit template attach [--source <name>] <条目名>` / `detach <条目名>` | attach 会安装缺失资产；detach 只解除引用并报告孤儿 |
+| 删除模板 | `gdit template remove [-y\|--yes] [--edition standard\|dotnet] <版本>` | 被条目引用时拒绝删除 |
+
+### 1.8 环境诊断
 
 | 操作 | 指令 | 说明 |
 |---|---|---|
@@ -83,7 +95,7 @@
 | 探测来源可达性 | `gdit doctor --network` | 额外探测启用来源；单来源失败为警告，全部失败为错误 |
 | 展开诊断细节 | `gdit doctor --verbose` | 展开环境变量来源、来源状态与修复建议；敏感值仍保持掩码 |
 
-### 1.8 帮助
+### 1.9 帮助
 
 | 操作 | 指令 |
 |---|---|
@@ -135,6 +147,7 @@
 ├── instances/     # 启动器条目：<uuid>.toml，文件内为显示名、引擎引用、SDK 策略与环境
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
+├── templates/     # 已验证导出模板资产（不进入 state.toml）
 └── tmp/           # 下载/解压临时目录（中断残留自动清理）
 ```
 
