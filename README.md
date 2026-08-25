@@ -5,9 +5,9 @@
 </p>
 
 <div align="center">
-  <img alt="Go 1.24+" src="https://img.shields.io/badge/Go%201.24+-00ADD8?style=for-the-badge&amp;logo=go&amp;logoColor=white" height="28" />
+  <img alt="Go 1.25.13+" src="https://img.shields.io/badge/Go%201.25.13+-00ADD8?style=for-the-badge&amp;logo=go&amp;logoColor=white" height="28" />
   <a href="./LICENSE"><img alt="AGPL-3.0" src="https://img.shields.io/badge/AGPL--3.0-394260?style=for-the-badge" height="28" /></a>
-  <img alt="Platform: Linux and macOS" src="./assets/readme/platforms-badge.svg" height="28" />
+  <img alt="Platform: Linux, macOS, and Windows" src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-448FF1?style=for-the-badge" height="28" />
   <img alt="Experimental" src="https://img.shields.io/badge/Experimental-F2994A?style=for-the-badge" height="28" />
 </div>
 
@@ -23,7 +23,7 @@ GoDoIt（够独特）是一个简单易用的 Godot 引擎启动器与版本管�
 
 ## 快速开始
 
-当前仓库提供源码构建方式。需要 Go 1.24 或更新版本。
+当前仓库提供源码构建方式。需要 Go 1.25.13 或更新版本，发布构建使用受支持的 Go 1.26.x。
 
 ```bash
 make build
@@ -51,18 +51,19 @@ godot --editor
 | 管理托管 SDK | `gdit sdk list/available/install/remove` |
 | 清理孤儿资产 | `gdit autoremove --yes` |
 | 管理下载来源 | `gdit source`、`gdit source use <name>` |
+| 诊断本地环境 | `gdit doctor [--network] [--verbose]` |
 
 完整命令参数见 [`docs/commands.md`](./docs/commands.md)，设计边界以 [`docs/architecture/README.md`](./docs/architecture/README.md) 为准。
 
 ## 数据布局
 
-GoDoIt 的用户级数据统一放在 `~/.gdit/`，项目目录不会被写入：
+GoDoIt 的用户级数据默认放在 `~/.gdit/`，可用绝对路径环境变量 `GDIT_ROOT` 覆盖；项目目录不会被写入：
 
 ```text
 ~/.gdit/
 ├── config.toml       # 来源顺序与全局环境
 ├── state.toml        # 由 gdit 维护的资产索引
-├── current           # 指向 instances/<uuid>.toml（当前条目）
+├── current           # Unix symlink / Windows 重定向文件，指向当前条目
 ├── instances/        # 启动条目：<uuid>.toml，显示名（可中文）存在文件内
 ├── engines/          # Godot 引擎资产
 ├── sdks/             # 托管 .NET SDK 资产
@@ -74,11 +75,11 @@ GoDoIt 的用户级数据统一放在 `~/.gdit/`，项目目录不会被写入�
 | 平台 | 状态 |
 | --- | --- |
 | Linux amd64 | 主支持和 fixture 集成测试平台 |
-| macOS arm64 | 可交叉构建，实机行为验收待完成 |
-| Windows | 不支持，也不会加入 Windows 代码 |
+| macOS arm64 | 验证级支持；原生 Apple Silicon CI 门禁已配置，发布以 CI 绿灯为准 |
+| Windows x86_64 | 验证级支持：`godot.cmd` shim、LockFileEx、MoveFileEx 原子写；WinBoat Windows 11 x86_64 原生验收已通过 |
 
-当前阶段已经覆盖引擎来源 fallback、SHA-256/SHA-512 校验、instances、环境注入、托管/系统 SDK 和资产 GC。
-`doctor` 属于下一阶段；项目建议、导出模板和 GUI 属于后续阶段。
+当前发布候选已经覆盖引擎来源 fallback、SHA-256/SHA-512 校验、instances、环境注入、托管/系统 SDK、
+资产 GC、`doctor` 与三平台适配层。项目建议、导出模板和 GUI 属于后续阶段。
 
 ## 开发
 

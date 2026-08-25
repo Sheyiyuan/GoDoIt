@@ -16,6 +16,9 @@ func TestExtractZipRejectsUnsafeEntries(t *testing.T) {
 	}{
 		{name: "parent", path: "../escape"},
 		{name: "absolute", path: "/escape"},
+		{name: "backslash absolute", path: `\escape`},
+		{name: "windows drive", path: `C:\escape`},
+		{name: "backslash parent", path: `..\escape`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

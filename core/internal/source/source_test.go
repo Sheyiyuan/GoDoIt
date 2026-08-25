@@ -156,6 +156,21 @@ func TestProvidersFromConfigKeepsAtomgitUnconfigured(t *testing.T) {
 	}
 }
 
+func TestProvidersFromConfigRejectsInvalidCustomTemplates(t *testing.T) {
+	cfg := config.File{
+		SchemaVersion: 1,
+		SourceOrder:   []string{"fixture"},
+		CustomSources: []config.CustomSource{{
+			Name:        "fixture",
+			ArtifactURL: "https://mirror.example/{branch}/{asset}",
+			ChecksumURL: "https://mirror.example/{tag}/SHA256SUMS.txt",
+		}},
+	}
+	if _, err := ProvidersFromConfig(cfg, nil); err == nil {
+		t.Fatal("invalid custom source template was accepted")
+	}
+}
+
 func TestHTTPProviderTreatsTemporaryStatusAsUnavailable(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return fixtureResponse(request, http.StatusBadGateway, []byte("try again")), nil

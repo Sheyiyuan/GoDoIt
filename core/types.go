@@ -81,6 +81,12 @@ type Source interface {
 	Resolve(context.Context, SourceRequest) (Artifact, error)
 }
 
+// MetadataProber 是暴露元数据端点（doctor --network 可达性探测）的来源。
+// URL 模板型自定义源不设置元数据端点，实现返回空串表示跳过探测。
+type MetadataProber interface {
+	MetadataEndpoint() string
+}
+
 // ProgressEvent 描述安装过程中可展示给 CLI 或 GUI 的进度。
 type ProgressEvent struct {
 	Stage           string `json:"stage"`

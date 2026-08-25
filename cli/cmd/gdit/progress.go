@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	ansiRed   = "\x1b[31m"
-	ansiGreen = "\x1b[32m"
-	ansiGray  = "\x1b[90m"
-	ansiReset = "\x1b[0m"
+	ansiRed    = "\x1b[31m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
+	ansiGray   = "\x1b[90m"
+	ansiReset  = "\x1b[0m"
 	// ansiBrand 是品牌色：Go(#00ADD8)、Godot(#478CBF)、C#(#68217A) 三色取平均
 	// 得到 rgb(58,115,176) = #3A73B0，以 truecolor 输出。
 	ansiBrand = "\x1b[38;2;58;115;176m"

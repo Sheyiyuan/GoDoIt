@@ -59,8 +59,8 @@ func TestProbeSystemDistinguishesMissingCommandFromExecutionFailure(t *testing.T
 	if err != nil || len(items) != 0 {
 		t.Fatalf("missing dotnet should be an empty list: %+v err=%v", items, err)
 	}
-	failing := filepath.Join(t.TempDir(), "dotnet")
-	if err := os.WriteFile(failing, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	failing, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ProbeSystem(context.Background(), failing); err == nil {

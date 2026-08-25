@@ -45,6 +45,17 @@ type VersionLister interface {
 	ListVersions(ctx context.Context) ([]VersionInfo, error)
 }
 
+// MetadataProber 是暴露元数据端点（供 doctor --network 可达性探测）的来源。
+// 自定义 URL 模板源不设置元数据端点，实现返回空串表示跳过探测。
+type MetadataProber interface {
+	MetadataEndpoint() string
+}
+
+// AuthorizationEnvProvider 是暴露授权环境变量名（供 doctor 检查是否已设置）的来源。
+type AuthorizationEnvProvider interface {
+	AuthorizationEnvName() string
+}
+
 // ResolveRequest 是 provider 内部使用的资产解析请求。
 type ResolveRequest struct {
 	Version   string
@@ -101,6 +112,12 @@ type HTTPProvider struct {
 
 // Name 返回来源名称。
 func (p HTTPProvider) Name() string { return p.SourceName }
+
+// MetadataEndpoint 返回版本枚举元数据端点；未配置时返回空串（不参与可达性探测）。
+func (p HTTPProvider) MetadataEndpoint() string { return p.ReleasesURL }
+
+// AuthorizationEnvName 返回授权环境变量名。
+func (p HTTPProvider) AuthorizationEnvName() string { return p.AuthorizationEnv }
 
 // Resolve 解析下载 URL，并从同一来源取得预期摘要。
 func (p HTTPProvider) Resolve(ctx context.Context, request ResolveRequest) (Artifact, error) {
@@ -317,16 +334,38 @@ func ProvidersFromConfig(cfg config.File, client *http.Client) ([]Provider, erro
 			if !ok {
 				return nil, ConfigError{Err: fmt.Errorf("built-in source %q has no URL configuration yet", name)}
 			}
-			providers = append(providers, HTTPProvider{
+			provider := HTTPProvider{
 				SourceName:       item.Name,
 				ArtifactTemplate: item.ArtifactURL,
 				ChecksumTemplate: item.ChecksumURL,
 				AuthorizationEnv: item.AuthorizationEnv,
 				Client:           client,
-			})
+			}
+			if err := validateProviderTemplates(provider); err != nil {
+				return nil, ConfigError{Err: fmt.Errorf("custom source %q: %w", name, err)}
+			}
+			providers = append(providers, provider)
 		}
 	}
 	return providers, nil
+}
+
+// validateProviderTemplates 用固定安全输入预展开自定义来源模板，确保 doctor 等只读入口
+// 无需发起网络请求也能发现非法占位符、协议和凭据。
+func validateProviderTemplates(provider HTTPProvider) error {
+	templates := []struct {
+		label string
+		value string
+	}{
+		{label: "artifact_url", value: provider.ArtifactTemplate},
+		{label: "checksum_url", value: provider.ChecksumTemplate},
+	}
+	for _, template := range templates {
+		if _, err := expandURL(template.value, "0.0.0", "gdit-fixture.zip"); err != nil {
+			return fmt.Errorf("%s: %w", template.label, err)
+		}
+	}
+	return nil
 }
 
 func expandURL(template, version, asset string) (string, error) {
@@ -435,6 +474,12 @@ type GodotHubProvider struct {
 
 // Name 返回来源名称。
 func (p GodotHubProvider) Name() string { return p.SourceName }
+
+// MetadataEndpoint 返回 GodotHub 元数据端点（doctor --network 可达性探测）。
+func (p GodotHubProvider) MetadataEndpoint() string { return p.MetadataURL }
+
+// AuthorizationEnvName 返回授权环境变量名。
+func (p GodotHubProvider) AuthorizationEnvName() string { return p.AuthorizationEnv }
 
 // Resolve 从 releases.json 匹配 tag_name 和资产名，返回下载 URL 与预期摘要。
 func (p GodotHubProvider) Resolve(ctx context.Context, request ResolveRequest) (Artifact, error) {

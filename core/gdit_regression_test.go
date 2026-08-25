@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/Sheyiyuan/GoDoIt/core/internal/lock"
 	"github.com/Sheyiyuan/GoDoIt/core/internal/platform"
 )
@@ -148,7 +146,7 @@ func TestRemoveInstanceWithDanglingCurrent(t *testing.T) {
 	if err := os.Remove(filepath.Join(manager.root, "current")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join("instances", "0f8b1c2d-3e4f-4a5b-9c8d-7e6f5a4b3c2d.toml"), filepath.Join(manager.root, "current")); err != nil {
+	if err := platform.WriteCurrentPointer(manager.root, filepath.Join("instances", "0f8b1c2d-3e4f-4a5b-9c8d-7e6f5a4b3c2d.toml")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.RemoveInstance(context.Background(), "work"); err != nil {
@@ -236,19 +234,21 @@ func TestInstallEntryHoldsSingleGlobalLock(t *testing.T) {
 	}
 }
 
-// tryFlock 非阻塞尝试获取排他锁，返回是否成功获得。
+// tryFlock 非阻塞尝试获取平台排他锁，返回是否成功获得。
 func tryFlock(path string) (bool, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return false, err
 	}
 	defer file.Close()
-	err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	err = platform.LockFile(file)
 	if err == nil {
-		unix.Flock(int(file.Fd()), unix.LOCK_UN)
+		if releaseErr := platform.ReleaseLock(file); releaseErr != nil {
+			return false, releaseErr
+		}
 		return true, nil
 	}
-	if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+	if errors.Is(err, platform.ErrLocked) {
 		return false, nil
 	}
 	return false, err

@@ -3,7 +3,7 @@ title: 命令参考
 description: gdit 命令、参数和行为约定的速查表。
 section: reference
 order: 1
-updated: 2026-08-19
+updated: 2026-08-21
 ---
 
 命令简写为 `install`→`i`、`list`→`l`、`source`→`s`、`available`→`a`、`default`→`d`、`run`→`r`、`remove`→`rm`、`setup`→`st`、`env`→`e`。
@@ -25,9 +25,9 @@ updated: 2026-08-19
 
 | 操作 | 指令 | 说明 |
 |---|---|---|
-| 查看当前条目 | `gdit default` | 未设置或链接无效时报错 |
-| 设置当前条目 | `gdit default <name>` | 原子更新 `~/.gdit/current`，失败保留旧链接 |
-| 创建 godot 入口 | `gdit setup` | 创建/修复 `~/.gdit/bin/godot` shim；不改 shell 配置 |
+| 查看当前条目 | `gdit default` | 未设置或指针无效时报错 |
+| 设置当前条目 | `gdit default <name>` | 原子更新 current 指针，失败保留旧值 |
+| 创建 godot 入口 | `gdit setup` | Unix 创建 `godot` symlink，Windows 创建 `godot.cmd`；不改 shell 或系统 PATH |
 | 启动当前条目 | `gdit run [-- 参数]` / `-d` | 等价裸 `godot` |
 | 启动指定条目 | `gdit run <name> [-- 参数]` | 不改变 current |
 
@@ -62,8 +62,17 @@ updated: 2026-08-19
 | 指定来源安装 | `gdit engine install <版本> --source <name>` | 该来源失败不自动降级 |
 | 探测可装版本 | `gdit available [--source <name>]` | URL 模板型自定义源无法枚举，返回配置错误 |
 
+## 环境诊断
+
+| 操作 | 指令 | 说明 |
+|---|---|---|
+| 本地诊断 | `gdit doctor` | 检查平台、根目录、shim、current、条目、资产、环境、来源和 state；默认零网络、零落盘 |
+| 网络探测 | `gdit doctor --network` | 额外探测启用来源的可达性 |
+| 展开细节 | `gdit doctor --verbose` | 显示环境来源、来源状态和修复建议；敏感值仍掩码 |
+
 ## 约定
 
 - 版本输入只接受精确三段稳定版本，例如 `4.5.2`。条目显示名是 URL 安全字符集（ASCII 只允许 `[A-Za-z0-9._~-]`，非 ASCII 文字如中文允许），全仓库唯一，与版本号/资产 ID 分属不同命名空间。
 - 传给引擎的参数放在 `--` 之后，例如 `gdit run -- -e`。
 - 用户结果写入 stdout，调试、进度和错误写入 stderr。
+- `GDIT_ROOT` 可把全部用户数据迁移到任意绝对路径；未设置时使用平台默认用户目录。

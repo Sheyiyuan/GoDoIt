@@ -201,7 +201,7 @@ func (m *Manager) RemoveInstance(ctx context.Context, name string) (RemoveInstan
 		return RemoveInstanceResult{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	storeRoot := store.New(m.root)
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return RemoveInstanceResult{}, localIOError("create store root", err)
 	}
 	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
@@ -295,7 +295,7 @@ func (m *Manager) orphansFor(items []instance.File) ([]OrphanAsset, error) {
 // AutoRemove 在锁内重新扫描引用，只删除复查时仍为孤儿的资产。
 func (m *Manager) AutoRemove(ctx context.Context) (AutoRemoveResult, error) {
 	storeRoot := store.New(m.root)
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return AutoRemoveResult{}, localIOError("create store root", err)
 	}
 	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
@@ -480,18 +480,20 @@ func (m *Manager) installSDKLocked(ctx context.Context, version string) (SDKInst
 		return SDKInstallResult{}, downloadErr
 	}
 	staging := filepath.Join(operation, "staging")
-	if err := archive.ExtractTarGz(download, staging); err != nil {
-		return SDKInstallResult{}, fmt.Errorf("%w: %v", ErrInvalidArchive, err)
+	if platform.SDKArchiveFormat(target) == "zip" {
+		if err := archive.ExtractZip(download, staging); err != nil {
+			return SDKInstallResult{}, fmt.Errorf("%w: %v", ErrInvalidArchive, err)
+		}
+	} else {
+		if err := archive.ExtractTarGz(download, staging); err != nil {
+			return SDKInstallResult{}, fmt.Errorf("%w: %v", ErrInvalidArchive, err)
+		}
 	}
-	launcher := filepath.Join(staging, "dotnet")
-	info, err := os.Lstat(launcher)
-	if err != nil || !info.Mode().IsRegular() {
+	launcherName := platform.SDKLauncherName()
+	if err := platform.PrepareLauncher(staging, launcherName); err != nil {
 		return SDKInstallResult{}, fmt.Errorf("%w: SDK launcher is missing", ErrInvalidArchive)
 	}
-	if err := os.Chmod(launcher, 0o755); err != nil {
-		return SDKInstallResult{}, localIOError("prepare SDK launcher", err)
-	}
-	manifest := store.SDKManifest{Version: version, TargetOS: target.OS, TargetArch: target.Arch, Source: sourceName, ChecksumAlgorithm: "sha512", Checksum: resolved.Hash, Launcher: "dotnet", InstalledAt: m.now().UTC().Format(time.RFC3339)}
+	manifest := store.SDKManifest{Version: version, TargetOS: target.OS, TargetArch: target.Arch, Source: sourceName, ChecksumAlgorithm: "sha512", Checksum: resolved.Hash, Launcher: launcherName, InstalledAt: m.now().UTC().Format(time.RFC3339)}
 	if err := storeRoot.WriteSDKManifest(staging, manifest); err != nil {
 		return SDKInstallResult{}, localIOError("write SDK manifest", err)
 	}
@@ -523,7 +525,7 @@ func (m *Manager) RemoveSDK(ctx context.Context, version string) error {
 		return err
 	}
 	storeRoot := store.New(m.root)
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	guard, err := lock.Acquire(ctx, storeRoot.LockPath())
@@ -613,9 +615,11 @@ func (m *Manager) environmentFor(ctx context.Context, item instance.File) (launc
 	if err != nil {
 		return launchenv.Result{}, fmt.Errorf("%w: %v", ErrUnsupportedPlatform, err)
 	}
+	global := cfg.Environment.Global
+	platformSection := cfg.Environment.PlatformVars(target.OS)
 	managedDir := ""
 	// Godot 3.x mono 依赖系统 Mono 运行时，不做 .NET SDK 解析与注入。
-	if item.Engine.Edition == "dotnet" && !launchenv.ExplicitDotnetRoot(cfg.Environment, item.Env) && item.Dotnet.Strategy != "mono" {
+	if item.Engine.Edition == "dotnet" && !launchenv.ExplicitDotnetRoot(global, platformSection, item.Env) && item.Dotnet.Strategy != "mono" {
 		if item.Dotnet.Strategy == "managed" {
 			installed, scanErr := sdkInstalled(store.New(m.root), item.Dotnet.Version)
 			if scanErr != nil {
@@ -655,7 +659,7 @@ func (m *Manager) environmentFor(ctx context.Context, item instance.File) (launc
 			}
 		}
 	}
-	return launchenv.Build(os.Environ(), cfg.Environment, item.Env, target, managedDir), nil
+	return launchenv.Build(os.Environ(), global, platformSection, item.Env, target, managedDir), nil
 }
 
 // SetEnvVar 设置全局或条目环境变量。
@@ -678,7 +682,7 @@ func (m *Manager) changeEnv(ctx context.Context, name, key, value string, remove
 	if validateErr != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidInput, validateErr)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)

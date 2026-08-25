@@ -3,18 +3,19 @@ title: 目录布局与配置
 description: ~/.gdit 下的文件、全局配置和实例条目格式。
 section: reference
 order: 2
-updated: 2026-08-19
+updated: 2026-08-21
 ---
 
 ## 目录布局
 
-GoDoIt 的所有状态都在用户级目录 `~/.gdit/` 中。
+GoDoIt 的所有状态默认在用户级目录 `~/.gdit/` 中。Windows 默认目录为
+`%USERPROFILE%\.gdit`；`GDIT_ROOT` 可覆盖为任意绝对路径。
 
 ```text
 ~/.gdit/
 ├── config.toml    # 唯一用户配置文件（来源、全局环境）
 ├── state.toml     # 已安装资产索引（可自动重建）
-├── current        # 指向 instances/<uuid>.toml 的相对软链接
+├── current        # Unix 相对软链接；Windows 为规范相对路径重定向文件
 ├── instances/     # 启动器条目：<uuid>.toml，显示名在文件内
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
@@ -33,6 +34,16 @@ disabled_sources = []                   # source ban 写入的禁用名单
 [environment]
 display_driver = "auto"    # auto / x11 / wayland
 input_method = "auto"      # auto / fcitx / off
+COMMON_VALUE = "global"
+
+[environment.linux]
+LINUX_ONLY = "value"
+
+[environment.darwin]
+MACOS_ONLY = "value"
+
+[environment.windows]
+WINDOWS_ONLY = "value"
 
 [[custom_sources]]
 name = "company-mirror"
@@ -42,6 +53,9 @@ authorization_env = "GDIT_COMPANY_MIRROR_TOKEN"
 ```
 
 自定义源占位符只允许 `{version}`、`{tag}`、`{asset}`。URL 必须使用 HTTPS，localhost fixture 测试除外。`gdit source use`、`ban` 和 `unban` 写回时会保留其他已知字段，但不会保留注释。
+
+`[environment]` 是三平台通用变量；平台小节仅在对应平台生效，并覆盖全局同名键。
+`display_driver` 与 `input_method` 只在 Linux 支持非 `auto` 值。
 
 ## instances/<uuid>.toml
 

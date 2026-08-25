@@ -1007,7 +1007,8 @@ func (s *wrongChecksumSource) Resolve(ctx context.Context, request SourceRequest
 
 func requireFirstPhaseTarget(t *testing.T) {
 	t.Helper()
-	if _, err := platform.CurrentTarget(); err != nil {
+	target, err := platform.CurrentTarget()
+	if err != nil || !platform.IsLinux(target) {
 		t.Skip("first phase fixture targets Linux amd64")
 	}
 }

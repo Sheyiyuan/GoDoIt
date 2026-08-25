@@ -31,13 +31,13 @@ func ExtractZip(filename, destination string) error {
 }
 
 func extractEntry(entry *zip.File, destination string) error {
-	name := filepath.Clean(filepath.FromSlash(entry.Name))
+	name, err := cleanArchiveEntryPath(entry.Name)
+	if err != nil {
+		return err
+	}
 	if name == "." {
 		// "./" 这类当前目录条目安全且无内容，跳过。
 		return nil
-	}
-	if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("unsafe archive path %q", entry.Name)
 	}
 	if entry.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("unsupported archive entry %q", entry.Name)
