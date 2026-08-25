@@ -2,11 +2,14 @@
 
 > GoDoIt ｜ CLI/包名：gdit  
 > Go! Do It! 不等戈多，自己动手。  
-> 状态：v0.2 第三阶段实施中（instances 条目层 + engine 资产层 + 环境注入 + .NET SDK + 资产 GC）
+> 状态：v0.2 第四阶段实现完成、发布候选验证中（doctor + Linux/macOS/Windows 平台适配层）
+> 第四阶段验收与实现约束见 docs/architecture/README.md §9.6 与 §4.9。
+> 平台扩展：Windows x86_64 为验证级支持；发布须通过 Windows 原生验收与 macOS Apple Silicon CI。
 
 ## 1. 项目定位
 
-GoDoIt 是面向 Linux（主）和 macOS（验证）的 **Godot 引擎启动器与版本管理器**。底层是包管理器：
+GoDoIt 是面向 Linux（主）、macOS Apple Silicon（验证）与 Windows x86_64（验证）的
+**Godot 引擎启动器与版本管理器**。底层是包管理器：
 统一安装、校验、卸载 Godot 引擎与 .NET SDK 资产（通过 `gdit engine` 命名空间访问）；上层是
 启动器条目（instances）：引用资产并携带 SDK 策略与环境配置，`godot` shim 读当前条目解析
 引擎与 SDK、注入环境后启动引擎。提供 CLI 与 Wails GUI 两种入口。
@@ -20,17 +23,23 @@ GoDoIt 管理的是引擎，不管理 Godot 项目：
 
 ## 2. 用户目录
 
-GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用户级 `~/.gdit/`：
+GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用户级 gdit 根目录：默认
+`~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），可用环境变量 `GDIT_ROOT` 覆盖为任意
+绝对路径（Windows 用户可将数据放在非系统盘，如 `D:\gdit`）。解析顺序：`GDIT_ROOT`
+（非空即用，必须是绝对路径）→ 平台默认路径；解析只发生在 platform 适配层。下文的
+`~/.gdit/` 指实际生效的根目录：
 
 ```text
 ~/.gdit/
 ├── config.toml
 ├── state.toml
 ├── bin/
-│   └── godot -> <gdit 可执行文件>
+│   ├── godot / godot.cmd          # Unix：symlink 指向 gdit；Windows：godot.cmd 包装（见 §2 平台形态）
+│   └── gdit(.exe)
 ├── instances/
 │   └── <uuid>.toml          # 条目文件；文件名是 UUID v4 存储标识，显示名存在文件内
-├── current -> instances/<uuid>.toml
+├── current                   # 当前条目指针：Unix 为 symlink → instances/<uuid>.toml；
+│                             #   Windows 为普通文本文件，内容为规范相对路径（避免 symlink 权限问题）
 ├── engines/                # 引擎资产（原 versions/）
 ├── sdks/                   # SDK 资产（原 dotnet/）
 ├── templates/
@@ -75,8 +84,9 @@ GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用
 `gdit default <name>` 将指定条目设为当前条目；`gdit default` 无参数显示当前条目。
 只接受条目显示名。
 
-- 通过原子更新 `~/.gdit/current` symlink（指向 `instances/<uuid>.toml`）完成设置，
-  失败保留旧链接；当前条目对所有目录一致，不做项目级自动切换。
+- 通过原子更新 `~/.gdit/current` 完成设置，失败保留旧值；current 是全局单一条目指针，
+  平台形态见 §2（Unix symlink / Windows 重定向文件，契约一致）；当前条目对所有目录
+  一致，不做项目级自动切换。
 - `gdit setup` 显式创建或修复 `~/.gdit/bin/godot` shim，但不修改 shell 配置或系统 PATH。
 - PATH 中的 `godot` shim 指向 `gdit`，由 gdit 读取 `current` 条目、解析引擎与 SDK、
   注入环境并启动真实引擎，透传参数、输出和退出码。shim 不访问网络。
@@ -105,7 +115,11 @@ GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用
 启动 Godot 时向子进程注入环境，不修改用户全局环境。
 
 - 全局默认写在 `~/.gdit/config.toml` 的 `[environment]`，条目覆盖写在
-  `instances/<uuid>.toml` 的 `[env]`；合并顺序：继承父环境 → 全局 → 条目 → 派生变量。
+  `instances/<uuid>.toml` 的 `[env]`；合并顺序：继承父环境 → 全局 → 平台小节 → 条目 →
+  派生变量。
+- 环境注入按平台配置（第四阶段）：`[environment]` 为三平台通用变量，
+  `[environment.linux|darwin|windows]` 平台小节仅当前平台生效（覆盖全局同名键）；
+  平台注入规则（已知键、fcitx、显示驱动、DOTNET_ROOT/PATH 前缀格式）按编译标签拆分实现。
 - 支持 `DOTNET_ROOT`、PATH 前缀、显示驱动和 fcitx 相关变量。
 - Linux 下显示驱动默认自动检测，不统一强制 x11。
 - fcitx 只在 Linux 检测到或用户明确启用时注入。
@@ -163,6 +177,17 @@ GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用
 - 下载源可用性和配置错误。
 
 doctor 默认只报告和建议，不静默修改。
+
+- 默认零网络、零落盘、不获取修改锁；`--network` 显式开启来源可达性探测（探测失败按
+  警告处理，不视为配置错误）。
+- 检查全部条目（不只当前条目）的引用完整性；任意坏条目按失败关闭哲学报错。
+- 环境变量预览对敏感键名（token/secret/password/key）掩码值，`--verbose` 也不放开。
+- 退出码：0 = 无错误；1 = 存在错误；警告不影响退出码。
+- 本阶段不提供自动修复（`--fix`）；doctor 只报告，修复入口沿用现有命令。
+- 检查项按平台差异化：shim 形态（Unix symlink / Windows `godot.cmd`）、PATH 分隔符、
+  fcitx 仅 Linux、`display_driver` 非 Linux 平台仅 `auto`、根目录权限位检查仅 POSIX
+  （Windows 降级为目录可访问检查）、引擎/SDK 启动文件按平台校验（.exe / dotnet.exe /
+  app bundle）。
 
 ### FR-09 GUI（P1 · 第六阶段）
 
@@ -225,7 +250,7 @@ Wails GUI 提供条目与版本列表、条目安装/卸载、当前条目切换
 | 类别 | 要求 |
 |---|---|
 | 分发 | CLI 单二进制；GUI 独立构建 |
-| 平台 | Linux 主，macOS Apple Silicon 验证，不支持 Windows |
+| 平台 | Linux 主，macOS Apple Silicon 与 Windows x86_64 验证 |
 | 配置 | 手写配置只使用 TOML |
 | 无侵入 | 不改系统文件、shell 配置、全局环境或系统 dotnet |
 | 健壮 | 多源 fallback，安装和 current 切换不暴露半成品 |
@@ -238,7 +263,9 @@ Wails GUI 提供条目与版本列表、条目安装/卸载、当前条目切换
 P0 包括 FR-01、FR-02、FR-03、FR-04、FR-05、FR-08、FR-11、FR-13 和 FR-14。**P0 全集是
 MVP 的最终目标；第一/二阶段只交付其中资产层部分（FR-01 的资产安装、FR-03 的资产查看、
 FR-12）与 default/remove/setup/run 的版本形态**，其余按架构文档 §9.3 的阶段顺序在后续
-阶段落地。
+阶段落地。验收以 Linux amd64 主平台为准；macOS Apple Silicon 与 Windows x86_64 为
+验证级支持，行为验收分别在 Apple Silicon 实机与 Windows 实机（或 CI Windows runner）
+完成，交叉编译只算构建检查。
 
 1. 能安装（创建条目）、列出、切换和卸载（删除条目）多个 Godot 版本条目。
 2. `godot` 在任意目录都启动 `~/.gdit/current` 指向的条目解析出的引擎。

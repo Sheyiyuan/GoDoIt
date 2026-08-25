@@ -1,6 +1,7 @@
 # GoDoIt 架构设计
 
-> 状态为 v0.2 第三阶段实施中（instances 条目层 + engine 资产层 + 环境注入 + .NET SDK + 资产 GC，落地范围见 §9.5）
+> 状态为 v0.2 第四阶段实现完成、发布候选验证中（doctor + Linux/macOS/Windows 平台适配层）
+> 第四阶段 doctor（FR-08）验收见 §9.6；平台适配层与 Windows 支持约束见 §4.9。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
 第一阶段的产品边界、摘要信任模型、Go module 路径和 Linux amd64 支持范围已经确认，可以实施
@@ -26,10 +27,15 @@ SDK 策略为 `managed`（默认）/ `system`，推荐映射表写死由 core �
 
 ## 1. 边界
 
-GoDoIt 是面向 Linux（主）和 macOS（验证）的 **Godot 引擎启动器与版本管理器**：底层是包管理器
-（引擎与 .NET SDK 资产的安装、校验、卸载），上层是启动器条目（instances，引用资产并携带
-SDK 策略与环境配置），`godot` shim 读当前条目解析引擎与 SDK、注入环境后启动。它只管理用户级
-Godot 引擎、导出模板和 .NET SDK。所有持久状态都在 `~/.gdit/`。
+GoDoIt 是面向 Linux（主）、macOS（验证）与 Windows（验证）的 **Godot 引擎启动器与版本管理器**：
+底层是包管理器（引擎与 .NET SDK 资产的安装、校验、卸载），上层是启动器条目（instances，
+引用资产并携带 SDK 策略与环境配置），`godot` shim 读当前条目解析引擎与 SDK、注入环境后启动。
+它只管理用户级 Godot 引擎、导出模板和 .NET SDK。所有持久状态都在 `~/.gdit/`。
+
+平台矩阵（第四阶段起）：**Linux amd64 主平台**（完整验收）；**macOS Apple Silicon 与
+Windows x86_64 验证级支持**（行为验收分别在 Apple Silicon 实机与 Windows 实机/CI runner
+完成，交叉编译只算构建检查）。平台差异全部收敛在 platform 适配层（拆分方案见 §4.9），
+业务代码不出现 `runtime.GOOS` 分支，不添加平台专属功能。
 
 项目相关能力只有 `gdit suggest`。用户显式传入目录后，GoDoIt 只读分析 `project.godot`、
 `global.json` 和 `.csproj`，给出安装建议。它不在项目目录写文件，不保存项目路径，不根据当前目录
@@ -37,15 +43,22 @@ Godot 引擎、导出模板和 .NET SDK。所有持久状态都在 `~/.gdit/`。
 
 ## 2. 用户目录
 
+gdit 根目录默认是 `~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），并允许用户通过环境变量
+`GDIT_ROOT` 覆盖为任意绝对路径（如 Windows 的 `D:\gdit`，把数据移出系统盘）——配置、状态、
+引擎、SDK、条目、临时目录全部随根目录走。解析顺序：`GDIT_ROOT`（非空即用，必须是绝对路径，
+否则配置错误）→ 平台默认路径；解析只发生在 platform 适配层（`ResolveRoot`），core 仍只接收
+已解析的根目录，不读环境变量。**下文文档中的 `~/.gdit/` 均指实际生效的根目录。**
+
 ```text
-~/.gdit/
+~/.gdit/                              # 默认根目录；可用 GDIT_ROOT 覆盖（Windows 为 %USERPROFILE%\.gdit）
 ├── config.toml                  # 用户配置（来源、全局环境）
 ├── state.toml                   # gdit 维护的已安装资产元数据（可自动重建）
 ├── bin/
-│   └── godot -> <gdit 可执行文件> # 用户级 shim
+│   ├── godot / godot.cmd        # 用户级 shim（Unix：symlink 指向 gdit；Windows：godot.cmd 包装）
+│   └── gdit / gdit.exe          # gdit 自身（Windows：gdit.exe）
 ├── instances/                   # 条目层（第三阶段）：可切换的启动配置
 │   └── <uuid>.toml              # 条目文件；文件名是 UUID v4，显示名存在文件内
-├── current -> instances/<uuid>.toml   # 当前条目（第三阶段起）
+├── current                      # 当前条目指针（第三阶段起；平台形态见下）
 ├── engines/                     # 引擎资产层（第二阶段的 versions/ 语义）
 │   ├── 4.5.2-standard/
 │   │   ├── install.toml         # 安装完成标记和最小可重建元数据
@@ -65,9 +78,16 @@ Godot 引擎、导出模板和 .NET SDK。所有持久状态都在 `~/.gdit/`。
   架构、edition、启动文件相对路径和资产摘要，不含用户配置。
 - `state.toml` 由 gdit 维护，不一致时按 `engines/`、`sdks/` 的有效资产目录和 `install.toml` 重建，
   不要求用户编辑。
-- `current` 是全局 symlink，所有目录使用同一个当前条目。第三阶段只接受指向
-  `instances/<uuid>.toml` 的规范相对链接；绝对路径、含 `..`、指向其他目录或指向非普通条目
-  文件的目标一律视为无效 current。
+- `current` 是全局单一条目指针，所有目录使用同一个当前条目。平台形态由 platform 能力
+  封装，core 层契约一致：
+  - **Unix**（Linux/macOS）：symlink 指向 `instances/<uuid>.toml`，只接受规范相对链接；
+    绝对路径、含 `..`、指向其他目录或指向非普通条目文件的目标一律视为无效 current。
+  - **Windows**：普通文本文件，内容为规范相对路径 `instances/<uuid>.toml`（无 BOM、
+    单行、允许结尾换行）；内容非规范相对路径、指向其他目录或非普通条目文件一律视为
+    无效 current。选择重定向文件而非 symlink：Windows 创建文件 symlink 需要管理员或
+    开发者模式，重定向文件零特权要求；读取/写入契约与 Unix 语义完全一致
+    （`ReadCurrentLink`/`WriteCurrentLink` 平台能力），写入均为原子替换（Unix 临时
+    symlink + rename；Windows 临时文件 + MoveFileEx）。
 - `instances/` 只放条目描述文件，不复制任何二进制；条目引用资产层（引擎、SDK），不内嵌资产。
   条目文件名是存储标识符（UUID v4），用户可见的显示名（可中文）存放在文件内，二者分离：
   用户通过显示名寻址（`gdit run <显示名>`），内部一律以 UUID 为准（current、引用、GC）。
@@ -75,12 +95,23 @@ Godot 引擎、导出模板和 .NET SDK。所有持久状态都在 `~/.gdit/`。
 - `cache/` 属于 FR-10（缓存管理，P2）预留，第一阶段不创建该目录，安装下载直接进入 `tmp/`。
 - 运行时文件锁可以放在 `~/.gdit/.lock`，它不是配置或项目 lock。
 
-第一版固定使用 `~/.gdit/`，不把同一套数据拆到多个 XDG 目录。macOS 也保持相同用户目录，
-只有引擎资产布局和平台命令由适配层处理。
+第一版默认使用 `~/.gdit/`，不把同一套数据拆到多个 XDG 目录；用户可用 `GDIT_ROOT` 覆盖
+为任意绝对路径（Windows 用户可把数据放在非系统盘）。三个平台保持相同根目录语义，
+只有引擎资产布局、shim 形态、current 文件形态和平台命令由适配层处理。
 
-core 构造时必须接收一个已解析的根目录。CLI 和 GUI 的生产入口通过 platform 适配层把用户主目录
-解析为 `~/.gdit/`，测试直接传入临时目录。core 内部不能再次读取真实用户主目录，也不提供隐式的
-项目级根目录覆盖。
+**shim 平台形态**：Unix（Linux/macOS）为 `bin/godot` symlink 指向 gdit，以 `godot` 名称
+启动时由 argv[0] 判断进入 shim 路径并 execve 引擎；Windows 为 `bin/godot.cmd` 批处理包装
+（调用 `setup` 时实际运行的 `gdit.exe` 绝对路径，追加 `__shim %*` 并透传 `%errorlevel%`），由 `__shim` 入口解析 current、
+spawn 引擎并透传退出码——Windows 无 execve，子进程共享控制台，Ctrl+C 天然透传。
+`__shim` 与 Unix 的 argv[0] 判断共用同一份 runShim 逻辑（永远启动 current、参数直通引擎、
+不经过 gdit 命令解析、无 TTY 交互）；argv[0] 判断仅 Unix 有效（Windows 下 `godot.cmd`
+内的 argv[0] 是 gdit.exe），Windows 靠显式子命令识别 shim 调用。`.cmd` 不复制二进制；
+原路径内升级自动生效，移动 `gdit.exe` 后重新运行 `setup` 修复包装。
+
+core 构造时必须接收一个已解析的根目录。CLI 和 GUI 的生产入口通过 platform 适配层的
+`ResolveRoot` 解析：`GDIT_ROOT` 非空时校验并采用（必须是绝对路径，否则配置错误），否则
+按平台默认路径（`~/.gdit/` / `%USERPROFILE%\.gdit`）。测试直接传入临时目录。core 内部
+不能再次读取真实用户主目录或环境变量，也不提供隐式的项目级根目录覆盖。
 
 ## 3. 版本标识
 
@@ -116,8 +147,10 @@ gdit list
 同时出现时报用法错误；`m` 后不是合法三段版本号时走现有版本语法错误。该糖在版本解析层
 实现，install/remove/default/run 四个命令统一生效。
 
-第一阶段只承诺 Linux amd64 的完整安装流程。MVP 仍需完成 Linux 的正式支持和 macOS Apple Silicon
-实机验证。Linux arm64 是否列入 MVP 需要在 review 时明确，不能仅凭上游存在对应资产就视为已支持。
+平台支持矩阵（第四阶段起）：Linux amd64 主平台（完整验收）、macOS Apple Silicon 与
+Windows x86_64 验证级支持（实机验收，交叉编译不算完成）。Linux arm64 是否列入支持范围
+仍需在 review 时明确，不能仅凭上游存在对应资产就视为已支持；Windows arm64 资产（4.5.2
+起有 `windows_arm64.exe.zip`）同样不承诺。
 
 第三阶段起，用户日常寻址的单位是**条目显示名**，资产 ID 只在 `gdit engine`/`gdit sdk`
 命名空间和条目引用中出现，不再直接出现在日常命令里。条目文件以 UUID v4 命名
@@ -195,6 +228,8 @@ engine 引用。
 `gdit setup` 在用户显式执行时创建或修复 `~/.gdit/bin/godot` shim，并在该目录未加入 PATH 时给出
 提示。它不修改 shell 配置或系统 PATH。以 `godot` 名称启动时，gdit 进入 shim 路径：读取
 `~/.gdit/current`，解析引擎启动文件，execve 替换自身进程启动真实 Godot，透传参数、stdio 和退出码。
+shim 的平台形态见 §2：Unix 靠 argv[0] 判断进入 shim 分支；Windows 由 `godot.cmd` 调用
+`__shim` 显式子命令进入同一 runShim 逻辑（参数直通引擎、不过命令解析、无 TTY 交互）。
 
 `gdit run` 第三阶段起只接受条目名：`gdit run`（无参数）启动当前条目，等价于裸 `godot`；
 `gdit run <name>` 启动命名条目；`-d` 保留为「当前条目」的显式别名。无参数 + TTY 且存在
@@ -241,17 +276,25 @@ digest 字段非法才属于配置错误。摘要信任与下载信任绑定：�
 digest 字段，GoDoIt 不把计算结果当作新的信任来源——来源被攻破即等价于镜像被攻破，这是与常见
 包管理器一致的供应链信任取舍。
 
-### 4.6 内置来源 URL 规则（2026-08-17 实测确认）
+### 4.6 内置来源 URL 规则（2026-08 实测确认）
 
 ```text
 github  资产     https://github.com/godotengine/godot-builds/releases/download/{tag}/{asset}
         tag       {version}-stable（稳定版）或 {version}（预发布），如 4.5.2-stable、4.8-dev3
-        资产名     Godot_v{version}-stable_linux.x86_64.zip
-                   Godot_v{version}-stable_mono_linux_x86_64.zip（dotnet 版）
+        资产名     Linux：Godot_v{version}-stable_linux.x86_64.zip
+                         Godot_v{version}-stable_mono_linux_x86_64.zip（dotnet 版）
+                   Windows：Godot_v{version}-stable_win64.exe.zip
+                         Godot_v{version}-stable_mono_win64.zip（dotnet 版）
+                   macOS：Godot_v{version}-stable_macos.universal.zip（4.x）
+                         Godot_v{version}-stable_mono_macos.universal.zip（4.x dotnet 版）
                    预发布版无 -stable 段：Godot_v4.8-dev3_linux.x86_64.zip
-                   3.x 命名不同：Godot_v3.6.2-stable_x11.64.zip（standard）、
-                   Godot_v3.6.2-stable_mono_x11_64.zip（mono，下划线）、
-                   Godot_v3.6.2-stable_osx.universal.zip（macOS）
+                   3.x 命名不同：Godot_v3.6.2-stable_x11.64.zip（Linux standard）、
+                   Godot_v3.6.2-stable_mono_x11_64.zip（Linux mono，下划线）、
+                   Godot_v3.6.2-stable_win64.exe.zip（Windows standard）、
+                   Godot_v3.6.2-stable_mono_win64.zip（Windows mono）、
+                   Godot_v3.6.2-stable_osx.universal.zip（macOS，3.x 用 osx 前缀）、
+                   Godot_v3.6.2-stable_mono_osx.universal.zip（macOS mono）
+                   3.x 的 x11 32 位、headless/server 变体与 4.x 的 arm32/arm64 变体不收录
         摘要      SHA512-SUMS.txt（同 release 目录，SHA-512）
 
 godothub 元数据  https://legacy.godothub.com/api/releases.json
@@ -374,7 +417,8 @@ version = "8.0.410"       # managed 必填，system 时忽略
 # EXAMPLE_VARIABLE = "value"
 ```
 
-- `current` symlink 指向 `instances/<uuid>.toml`；切换条目 = 原子替换 current。
+- `current` 是全局单一条目指针（平台形态见 §2：Unix symlink / Windows 重定向文件），
+  指向 `instances/<uuid>.toml`；切换条目 = 原子替换 current。
 - **显示名与存储标识分离**：文件名是 UUID v4（`crypto/rand` 生成，零新增依赖），条目文件内的
   `id` 字段与文件名一致；`name` 是用户可见的显示名，只承担寻址和展示，不参与任何文件系统
   操作（因此 macOS 文件系统的 Unicode 正规化差异不会影响中文显示名的匹配）。
@@ -419,6 +463,92 @@ version = "8.0.410"       # managed 必填，system 时忽略
 - 不自动下载、不自动删除：default/run 只选择条目引用的完整安装资产，shim 启动不访问
   网络（与 FR-02/FR-05 的显式原则一致）。自动化的只是「引用关系维护」，不是资产动作本身。
 
+### 4.9 平台适配层拆分（Linux / macOS / Windows）
+
+平台矩阵与验证级定义见 §1 与 §3。平台差异全部收敛在 `core/internal/platform/`，
+**业务代码（core 其余包、CLI、GUI bridge）不出现 `runtime.GOOS` 分支**。适配层按 OS
+拆分实现文件，由文件名后缀承担 build tag：
+
+```text
+core/internal/platform/
+├── platform.go           # 平台无关：Target 类型、IsLinux/IsDarwin/IsWindows 判定、共享常量
+├── platform_unix.go      # linux+darwin 共用 POSIX 能力（symlink、flock、rename、fsync、权限）
+├── platform_linux.go     # Linux：资产名、launcher、fcitx、display driver
+├── platform_darwin.go    # macOS：资产名（app bundle）、osx 命名、无 fcitx/display
+└── platform_windows.go   # Windows：.cmd shim、current 重定向文件、MoveFileEx、LockFileEx、无目录 fsync
+```
+
+上层只调用平台能力函数，不直接做 OS 分支。第四阶段同时把现有实现中散落的平台判断
+（lock 的 flock、CLI 的 execve、store 的 rename/sync 封装）下沉为平台能力，业务层
+行为不变。
+
+**能力清单**（platform 导出面；测试用固定输入覆盖三平台映射）：
+
+| 能力 | Linux | macOS | Windows |
+|---|---|---|---|
+| `ResolveRoot()` | `GDIT_ROOT` 非空即用（须绝对路径）→ `$HOME/.gdit` | 同 Linux | `GDIT_ROOT` 非空即用 → `%USERPROFILE%\.gdit` |
+| `AssetName()` | `linux.x86_64` / `mono_linux_x86_64` | `macos.universal` / `mono_macos.universal`（3.x：`osx.universal` / `mono_osx.universal`） | `win64.exe` / `mono_win64` |
+| `FindLauncher()` | 解压根目录二进制 | `.app` bundle 内 `Contents/MacOS/<bin>` | 解压根目录 `.exe` |
+| `SDKRID()` | `linux-x64` | `osx-arm64` | `win-x64` |
+| `SDKArchiveFormat()` | tar.gz | tar.gz | **zip**（`dotnet-sdk-<v>-win-x64.zip`，实测确认） |
+| `PrepareLauncher()` | chmod +x | chmod +x | no-op（无执行位） |
+| `DetectFcitx()` | XMODIFIERS / 进程检测 | 不注入 | 不注入 |
+| `DisplayDriver()` | auto / x11 / wayland | 仅 auto | 仅 auto |
+| `ShimPath()` / `EnsureShim()` | `bin/godot` symlink → gdit | 同 Linux | `bin/godot.cmd` 包装（记录 `setup` 时实际 `gdit.exe` 的绝对路径，调用 `__shim %*` 并透传退出码） |
+| `IsShimInvocation()` | argv[0] 基名为 `godot` | 同 Linux | 恒 false（`godot.cmd` 内 argv[0] 是 gdit.exe，识别由 `__shim` 子命令承担） |
+| current 读写（`ReadCurrentLink`/`WriteCurrentLink`） | symlink（规范相对链接） | 同 Linux | 普通文本文件，内容为规范相对路径 `instances/<uuid>.toml`（零特权，见 §2） |
+| `AcquireLock()` | flock（x/sys/unix） | 同 Linux | LockFileEx（x/sys/windows，零新增依赖） |
+| `RenameAtomic()` | rename(2) | 同 Linux | MoveFileEx(MOVEFILE_REPLACE_EXISTING)（`os.Rename` 目标存在即失败） |
+| `SyncDir()` | 目录 fsync | 同 Linux | 无目录 fsync；降级为文件 FlushFileBuffers，目录项持久性依赖 NTFS 日志 |
+| `PathListSeparator` | `:` | `:` | `;` |
+| 引擎启动（CLI 层） | execve | execve | os/exec spawn（Windows 无 execve；子进程共享控制台，Ctrl+C 天然透传） |
+
+**环境注入的平台化**（编译标签拆分实现）：
+
+`core/internal/env/` 按 OS 拆分注入实现：`env.go`（合并顺序与通用逻辑）、`env_linux.go`
+（display driver 参数、fcitx 变量）、`env_darwin.go` / `env_windows.go`（仅通用注入，
+无 Linux 专用变量）。配置侧支持平台小节（见 §5）：全局 `[environment]` 为三平台通用，
+`[environment.linux|darwin|windows]` 仅当前平台生效（覆盖全局同名键），条目 `[env]`
+在两者之上。合并顺序：继承父环境 → 全局 `[environment]` → 平台小节
+`[environment.<os>]` → 条目 `[env]` → 派生变量（fcitx、DOTNET_ROOT、PATH 前缀）。
+`EffectiveEnv`/doctor 的 environment 检查项按此顺序展示并标注来源（global/platform/
+instance/derived）。
+
+**各层差异说明**：
+
+- store/lock：锁、原子 rename、父目录同步、current 读写全部走适配层（架构已有「相关
+  系统调用由 platform 适配层封装」的约定，第四阶段把 Windows 实现补齐）。
+- env：见上「环境注入的平台化」；PATH 前缀分隔符用 `os.PathListSeparator`；
+  `DOTNET_ROOT` 三平台语义一致；fcitx 与 display driver 仅 Linux（非 Linux 平台
+  `display_driver`/`input_method` 只接受 `auto`，显式其他值报配置错误——沿用
+  「macOS 不注入 Linux 专用变量」哲学扩展为三平台）。
+- dotnet：RID 映射与资产格式按平台；Windows SDK 复用现有 zip 安全解压；launcher
+  为 `dotnet.exe`。
+- source：资产名按平台生成；`available` 枚举按平台资产存在判断 edition（Windows
+  的 `win64.exe.zip`/`mono_win64.zip`、macOS 的 `macos.universal`/3.x `osx.universal`）。
+- instance：显示名规则三平台一致（条目文件名是 UUID，不触碰文件系统大小写敏感差异）。
+- shim/run：见 §2「shim 平台形态」；`run` 语义三平台一致，退出码透传。
+- doctor：检查项按平台差异化（见 §9.6）。
+
+**Windows 特有问题（设计决策，待 review）**：
+
+1. shim 采用 `godot.cmd` 包装而非复制 `godot.exe`：包装记录 `setup` 时实际运行的
+   `gdit.exe` 绝对路径，避免复制品与原二进制不同步；原路径内升级自动生效，移动后重新运行
+   `setup` 修复，与 Unix symlink 的生命周期一致。包装调用
+   `__shim` 入口而非 `run`：shim 语义要求参数直通引擎、不经过 gdit 命令解析且无 TTY
+   交互，`run` 会解析参数并可能在 TTY 下交互选择条目（见 §2）。（建议：接受 .cmd。）
+2. current 采用**普通重定向文件**（内容为规范相对路径）而非 symlink：Windows 创建文件
+   symlink 需要管理员或开发者模式（Windows 10 14972+），重定向文件零特权；读写契约
+   与 Unix 语义一致，原子替换用临时文件 + MoveFileEx。不再要求开启开发者模式。
+3. Windows 无目录 fsync：原子写降级语义文档化，不追求与 POSIX 完全一致的崩溃保证。
+4. 3.x mono 版在 Windows 同样只安装资产、不解析不注入 SDK（Mono 运行时用户自理）。
+5. PATH 提示按平台输出（Unix `export PATH=...`；Windows 提示 `set PATH=...` 或
+   PowerShell 形式），由适配层提供提示模板，CLI 不拼平台文本。
+6. 行为验收：macOS Apple Silicon 实机；Windows x86_64 实机或 CI Windows runner
+   （现有 CI 已含跨平台构建，行为测试在 windows-latest runner 上执行）。纯映射
+   函数（资产名/launcher/RID/资产格式）在 Linux 上用固定输入单测覆盖三平台输出；
+   涉及文件系统、进程与环境的测试必须在对应实机执行。
+
 ## 5. 配置
 
 `~/.gdit/config.toml` 集中保存全部用户配置，内容如下。
@@ -431,6 +561,13 @@ disabled_sources = []
 [environment]
 display_driver = "auto"
 input_method = "auto"
+COMMON_VARIABLE = "all platforms"     # 三平台通用变量
+
+[environment.linux]                   # 平台小节（第四阶段）：仅当前平台生效，覆盖全局同名键
+XDG_SESSION_TYPE = "x11"
+
+[environment.windows]                 # Windows 专用变量（用户按需配置）
+EXAMPLE_WINDOWS_ONLY = "value"
 
 [[custom_sources]]
 name = "company-mirror"
@@ -442,7 +579,12 @@ authorization_env = "GDIT_COMPANY_MIRROR_TOKEN"
 条目配置（第三阶段起）见 §4.8 与 §9.5：`instances/<uuid>.toml` 保存引擎引用、
 `[dotnet]` 策略与 `[env]` 条目环境，不写入 config.toml。
 
-- `display_driver = "auto"` 不强制 x11；Linux 按会话检测，macOS 不设置该变量。
+- 环境注入合并顺序（第四阶段起）：继承父环境 → 全局 `[environment]` → 平台小节
+  `[environment.linux|darwin|windows]`（仅当前平台生效，覆盖全局同名键）→ 条目
+  `[env]` → 派生变量。平台小节与全局相同的键名校验规则（非空、不含 `=` 与 NUL）。
+- `display_driver = "auto"` 不强制 x11；Linux 按会话检测，macOS 与 Windows 不设置
+  该变量（非 Linux 平台 `display_driver`/`input_method` 只接受 `auto`，显式其他值
+  报配置错误）。
 - `input_method = "auto"` 只在 Linux 检测到 fcitx 时注入相关变量。
 - 选择 `~/.gdit/sdks/` 中的托管 SDK 时，shim 设置 `DOTNET_ROOT` 并把对应目录放到 PATH 前部。
 - 自定义源也写在此文件；认证信息不输出到日志。
@@ -546,7 +688,7 @@ GoDoIt/
 
 ### 7.1 core 公共 API
 
-core 对 CLI 和 GUI 暴露一个无界面语义的 `Manager`。截至第三阶段的累计公共面如下。
+core 对 CLI 和 GUI 暴露一个无界面语义的 `Manager`。截至第四阶段的累计公共面如下。
 
 ```go
 type Options struct {
@@ -585,7 +727,7 @@ type AvailableVersion struct {
 	Sources  []string `json:"sources"`
 }
 
-func DefaultRoot() (string, error)
+func ResolveRoot() (string, error) // 第四阶段起：GDIT_ROOT 非空即用（须绝对路径），否则平台默认路径
 func New(options Options) (*Manager, error)
 
 // 资产层（gdit engine 命名空间）
@@ -615,6 +757,9 @@ func (m *Manager) RemoveSDK(ctx context.Context, version string) error // 被条
 func (m *Manager) EffectiveEnv(ctx context.Context, instance string) (EnvView, error)
 func (m *Manager) SetEnvVar(ctx context.Context, instance, key, value string) error // 空=全局
 func (m *Manager) UnsetEnvVar(ctx context.Context, instance, key string) error
+
+// 第四阶段（doctor，见 §9.6）：纯只读诊断，不落盘、不拿锁，network 时探测来源可达性
+func (m *Manager) Doctor(ctx context.Context, network bool) (DoctorReport, error)
 ```
 
 最终字段名可以在编码前做一次 Go 命名校正，行为约束保持不变。`RootDir` 必填，`HTTPClient` 为空时使用
@@ -643,7 +788,7 @@ PATH；`ResolveLaunch` 解析启动目标（版本 ID 为空时取当前默认�
 
 第三阶段新增（见 §9.5）：条目层 API——`InstallEntry` 编排完整条目安装：锁内安装引擎资产
 （如缺）→ 按 `[dotnet]` 策略解析并安装 SDK 依赖（managed 时）→ 原子写条目文件 →
-（SetCurrent 为 true，或 nil 且尚无 current 时）原子替换 current symlink；推荐 patch 解析
+（SetCurrent 为 true，或 nil 且尚无 current 时）原子替换 current 指针；推荐 patch 解析
 失败（网络不可用）时报错终止，不写条目。`RemoveInstance` 在同一次锁内操作中校验全部条目、
 按排除目标后的引用关系预先计算孤儿，全部成功后才删除目标条目（当前条目拒绝删除），把一致
 的孤儿结果返回给 CLI 输出。
@@ -774,10 +919,14 @@ TODO handler 和只为编译通过的 GUI 占位。
 第一阶段  install/list（含来源管理扩展）
 第二阶段  remove + default/setup/shim + run
 第三阶段  instances 条目层 + 资产层命名空间 + 环境注入 + .NET SDK + 资产 GC
-第四阶段  doctor
+第四阶段  doctor + 平台适配层拆分（Linux/macOS/Windows）
 第五阶段  suggest + 导出模板
 第六阶段  Wails GUI
 ```
+
+第四阶段同时交付 doctor（FR-08，见 §9.6）与平台适配层拆分（§4.9）：doctor 的检查项
+按平台差异化与适配层能力化是同一工作的两面；Windows x86_64 支持随适配层拆分一并
+落地并在 Windows 实机/CI runner 验收。第五、六阶段直接建立在三平台适配层之上。
 
 remove 放到第二阶段，与 current 的引用约束一起实现，避免第一阶段先产生一套随后要改的删除语义。
 
@@ -886,7 +1035,7 @@ gdit engine list                      # 原 list；列资产（含引用状态�
    推荐与列表合并为文本输入）。
 5. 设为当前？默认值：当前未设置时为「是」，已设置时为「否」。
 6. 执行：安装引擎资产（多源 fallback，进度复用渲染器）→ managed 时解析并安装 SDK
-   依赖（apt 语义）→ 原子写条目文件 → 设为当前时原子替换 current symlink。
+   依赖（apt 语义）→ 原子写条目文件 → 设为当前时原子替换 current 指针。
 
 非交互形式 `gdit install <name> --version <版本>`：`--edition` 默认 standard；
 dotnet 时 `--sdk` 默认 managed；managed 且无 `--sdk-version` 时解析映射表推荐 major 的
@@ -897,16 +1046,19 @@ dotnet 时 `--sdk` 默认 managed；managed 且无 `--sdk-version` 时解析映�
 
 #### 环境模型
 
-- 合并顺序：继承 `os.Environ()` → 应用全局 `[environment]` 用户变量 → 应用当前条目
-  `[env]` 变量（覆盖全局）→ 最后应用派生变量（fcitx 变量、dotnet 版选择托管 SDK 时的
-  `DOTNET_ROOT` 与 PATH 前缀）。显示驱动以引擎参数注入，不在环境表里。
+- 合并顺序（第三阶段）：继承 `os.Environ()` → 应用全局 `[environment]` 用户变量 → 应用
+  当前条目 `[env]` 变量（覆盖全局）→ 最后应用派生变量（fcitx 变量、dotnet 版选择托管
+  SDK 时的 `DOTNET_ROOT` 与 PATH 前缀）。显示驱动以引擎参数注入，不在环境表里。
+  第四阶段起在全局与条目之间插入平台小节 `[environment.<os>]`（仅当前平台生效，覆盖
+  全局同名键），见 §4.9「环境注入的平台化」与 §5。
 - 已知键 `display_driver`（auto/x11/wayland）与 `input_method`（auto/fcitx/off）从合并后的
   环境表中读取，因此条目 `[env]` 可以覆盖全局值；其余键按普通变量注入。
-- 用户在全局 `[environment]` 或条目 `[env]` 显式配置 `DOTNET_ROOT` 时视为接管 SDK 定位：
-  跳过 SDK 选择与注入，不报“无兼容 SDK”错误，fcitx/display 仍正常处理。仅从父进程继承的
-  `DOTNET_ROOT` 不算显式接管，仍按条目策略选择并由派生值覆盖。
+- 用户在全局 `[environment]`、平台小节或条目 `[env]` 显式配置 `DOTNET_ROOT` 时视为接管
+  SDK 定位：跳过 SDK 选择与注入，不报“无兼容 SDK”错误，fcitx/display 仍正常处理。
+  仅从父进程继承的 `DOTNET_ROOT` 不算显式接管，仍按条目策略选择并由派生值覆盖。
 - 注入只作用于目标子进程（execve/spawn 的 env 参数），不修改 shell、系统 PATH 或系统 dotnet。
-- macOS 不注入 Linux 专用变量（display_driver/input_method 在 macOS 忽略）。
+- macOS 与 Windows 不注入 Linux 专用变量（display_driver/input_method 在非 Linux 平台
+  只接受 auto）。
 
 #### 显示驱动与输入法（Linux）
 
@@ -993,7 +1145,7 @@ SDK 作为依赖一并安装（apt 语义）。普通 `godot`（shim）启动永
 删除运行中 SDK 的目录不终止已启动的进程（POSIX inode 语义）。删除后同样参与孤儿提示
 （SDK 不被任何条目引用时在 autoremove 候选列表）。
 
-#### core API 扩展
+##### core API 扩展
 
 `ResolveLaunch` 第三阶段起合并环境并解析 SDK：
 
@@ -1061,7 +1213,7 @@ type AutoRemoveResult struct {
 type EnvVar struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
-	Origin string `json:"origin"` // global、instance 或 derived
+	Origin string `json:"origin"` // global、platform、instance 或 derived（第四阶段起含平台小节）
 }
 
 type EnvView struct {
@@ -1143,7 +1295,7 @@ EXAMPLE_VARIABLE = "value"    # 条目环境覆盖/新增（全局之下）
   `[versions.*.environment]`。开发与验收使用全新的 gdit 根目录；已有第二阶段测试数据需要由
   使用者自行移走后重新安装，gdit 不自动删除或改写旧数据。
 
-#### 交付范围
+##### 交付范围
 
 1. instance 包：条目读写与校验（UUID 标识 + 显示名规则 + 唯一性）、引用扫描与孤儿计算、
    条目层 install/remove 编排（`InstallEntry`/`RemoveInstance`）、`gdit autoremove`
@@ -1159,7 +1311,7 @@ EXAMPLE_VARIABLE = "value"    # 条目环境覆盖/新增（全局之下）
 7. shim/run 注入 `Args` + `Env`（execve/spawn），用户参数透传语义不变；run 条目化。
 8. 测试：单元、core 集成、CLI 集成；macOS 行为在 Apple Silicon 实机验证。
 
-#### 验收标准
+##### 验收标准
 
 - 全局与条目环境变量注入子进程（用打印 env 的假引擎验证），条目覆盖全局，父 shell
   环境不变。
@@ -1224,6 +1376,188 @@ EXAMPLE_VARIABLE = "value"    # 条目环境覆盖/新增（全局之下）
     非 TTY 无参数报用法错误；条目安装交互式的 managed SDK 版本三选一（推荐/列表/手动）。
     非交互形式仍只接受精确版本。（建议：接受。）
 
+### 9.6 第四阶段：doctor（FR-08 环境诊断）
+
+第四阶段交付 `gdit doctor`：**只读诊断命令**，收集式报告环境问题并给出建议，默认不做任何
+修改、不落盘、不访问网络（FR-08「doctor 默认只报告和建议，不静默修改」）。它是
+`engines/`、`sdks/` 下无效目录（§2「无效目录由 doctor 报告」）与 state 不一致的官方报告
+渠道：`list`/`sdk` 只认完整安装，凡被它们忽略的内容都由 doctor 说明原因。
+
+```text
+gdit doctor [--network] [--verbose]
+```
+
+- 无参数：全量本地检查（零网络、零落盘、不获取全局修改锁）。
+- `--network`：额外对启用来源做可达性探测（见「检查项」sources）。
+- `--verbose`：展开细节（环境变量列表、来源探测结果等）；默认每项一行摘要。
+- 简写：`doctor` 不设简写（顶层 `i/l/s/a/d/rm/r/st/e` 已占用，沿袭 sdk/autoremove 不设简写）。
+
+#### 检查项
+
+检查以**收集式**执行：单项失败降级为该检查项的 error 并继续，不中断后续检查；只有根目录
+本身不可读等致命情况才整体返回错误（`ErrLocalIO`）。每条检查输出：状态（ok/warn/error）、
+稳定 code、中文描述、可选建议。状态判定如下。
+
+| code | 检查内容 | error | warn |
+|---|---|---|---|
+| `platform` | 当前 OS/arch 是否在支持矩阵（§3：linux/amd64、darwin/arm64、windows/amd64） | 不在矩阵（如 linux/arm32），提示不支持的平台组合 | — |
+| `root-dir` | 实际根目录（`ResolveRoot`：`GDIT_ROOT` 非空即用，否则平台默认）存在且是目录、可读写；权限不对外可写（mode & 0o077，**仅 POSIX**；Windows 降级为目录可访问检查，不读取 ACL）。`GDIT_ROOT` 非法（非空相对路径/含 NUL）时命令在入口直接报配置错误，doctor 不进入 | 根目录缺失或不可访问（未初始化，建议 `gdit install`） | group/other 可写（建议 `chmod 700`）；`tmp/` 下遗留 `operation-*` 目录（上次安装中断残留，可安全删除） |
+| `shim` | 按平台形态检查（Unix：`bin/godot` symlink 指向 gdit；Windows：`bin/godot.cmd` 存在、记录当前 `gdit.exe` 绝对路径并调用 `__shim`）；`bin/` 在 PATH 中且无其他 godot 抢先（PATH 分隔符按平台） | shim 指向错误、目标不存在或包装内容错误（建议 `gdit setup`） | 未创建 shim；`bin/` 不在 PATH（提示文本按平台模板）；PATH 中其他 `godot` 先于 `<根目录>/bin`（说明启动的是哪个，建议调整 PATH 顺序） |
+| `current` | current 存在且为规范条目指针（按平台形态：Unix symlink / Windows 重定向文件，内容为 `instances/<uuid>.toml` 规范相对路径；§2 契约） | 悬空；绝对路径、含 `..`、指向其他目录或非普通条目文件；Windows 下文件内容非法或不可读 | 未设置 current（建议 `gdit install` 创建条目）；无任何条目 |
+| `instances` | 全部条目可读、可解析、合法（§4.8 校验）；每个条目引擎引用完整安装；managed SDK 引用已安装 | 任意坏条目（失败关闭哲学，逐条报文件名与原因，提示修复或删除）；引擎引用缺失（提示 `gdit engine install <id>` 或删除条目）；managed SDK 引用缺失（提示 `gdit sdk install <version>`） | — |
+| `engines` | `engines/` 下每个目录是完整安装（目录名合法 + install.toml 可解析 + launcher 存在；launcher 按平台校验：Unix 可执行文件 / macOS app bundle 内二进制 / Windows `.exe`） | 每个无效目录一条（原因：目录名不合法 / 缺 install.toml / install.toml 非法 / 启动文件缺失；提示手动删除或 `gdit engine remove <id>`） | state.toml 与目录不一致（下次读取会自动重建，doctor 不修改） |
+| `sdks` | `sdks/` 下每个目录是完整托管 SDK（目录名合法 + install.toml + dotnet 可执行：Unix `dotnet` / Windows `dotnet.exe`）；系统 SDK 探测结果 | 每个无效目录一条（同 engines） | 系统 SDK 探测失败（PATH 无 dotnet 或 `dotnet --list-sdks` 失败；仅信息性，系统无 SDK 不是错误） |
+| `templates` | `templates/` 目录状态 | — | 目录非预期存在且非空（模板支持属第五阶段 FR-07，内容暂不校验，提示不会被使用） |
+| `environment` | 对当前条目计算注入增量（复用 `EffectiveEnv`）：变量（键 + 来源：global/platform/instance/derived）、显示驱动参数、fcitx 变量、DOTNET_ROOT 接管状态 | 无 current 时该项降级为 warn 并跳过预览；非 Linux 平台配置非 `auto` 的 `display_driver`/`input_method`（配置错误） | 无 current（无法预览，说明原因） |
+| `sources` | config.toml 可解析；source_order 中的来源全部已知；disabled_sources 无未知来源；自定义源模板合法；authorization_env 指向的变量已设置 | 配置解析失败、schema 不支持、未知来源、模板非法 | authorization_env 未设置（不显示值）；`--network` 时来源探测失败（单个来源不可达；自定义源无元数据端点，标注跳过探测） |
+| `state` | state.toml 可解析且与 `engines/`、`sdks/` 有效目录一致 | — | 不可解析或与目录不一致（下次读取自动重建） |
+
+环境变量展示脱敏：键名匹配 `token`/`secret`/`password`/`key`（大小写不敏感）等敏感特征时
+值以 `******` 掩码，`--verbose` 也不放开；路径类（`DOTNET_ROOT`、PATH 前缀、fcitx 变量）
+显示完整值。`display_driver = "auto"` 时说明「不注入参数，由 Godot 原生默认与自动回退」；
+显式 x11/wayland 时说明注入 `--display-driver`；用户显式配置 `DOTNET_ROOT` 时标注「用户
+接管 SDK 定位」。平台差异化：fcitx 与显示驱动检查仅 Linux；macOS/Windows 跳过这两项，
+`display_driver`/`input_method` 非 `auto` 报配置错误；PATH 检查用平台分隔符拆分；
+PATH 提示文本由适配层提供模板（Unix `export PATH=...`，Windows `set PATH=...`）。
+`root-dir` 输出实际生效的根目录并标注来源（`GDIT_ROOT` 或平台默认）；environment
+检查项的每个变量标注来源层级（global/platform/instance/derived，见 §4.9 环境注入的
+平台化）。
+
+`--network` 探测：对 source_order 中每个启用且支持枚举的来源做 HEAD 请求其元数据端点
+（godothub `releases.json`、github releases API），单请求超时 5 秒，串行执行，响应
+context 取消；失败记为该来源 warn，全部失败汇总为 error。探测不改变配置、不写入任何
+状态。默认测试不访问公网（fixture HTTP server 替代）。
+
+#### core API
+
+`Doctor` 是纯只读公共方法：不获取全局修改锁、不写任何文件、不重建 state、不访问网络
+（除非 network=true）。结果结构带 json tag，供 CLI 渲染与第六阶段 GUI 复用。
+
+```go
+type CheckStatus string // "ok" | "warn" | "error"
+
+type CheckResult struct {
+	Code    string      `json:"code"`    // 稳定标识，对应检查项表 code
+	Status  CheckStatus `json:"status"`
+	Message string      `json:"message"` // 中文描述
+	Suggest string      `json:"suggest"` // 可选建议，如「运行 gdit setup」
+	Details []string    `json:"details"` // 可选展开细节，CLI 仅 --verbose 展示
+}
+
+type DoctorReport struct {
+	Root       string        `json:"root"`
+	Items      []CheckResult `json:"items"`
+	OKCount    int           `json:"ok_count"`
+	WarnCount  int           `json:"warn_count"`
+	ErrorCount int           `json:"error_count"`
+}
+
+func (m *Manager) Doctor(ctx context.Context, network bool) (DoctorReport, error)
+```
+
+复用现有能力：store 的 `ScanValid`/`ScanSDKs`/`ReadCurrent`/`ShimPath`/`DirectorySize`、
+instance 的 `Scan`/`Lookup`/`Validate`、config 的 `Load`/`validateSources`、
+`EffectiveEnv`、platform 的 `DetectFcitx` 与 current 规范链接判定（与读取路径同一实现，
+不复制规则）。系统 SDK 探测沿用 `Options.SDKProbe` 默认实现，测试注入固定结果。
+
+#### CLI 输出
+
+结果写 stdout，逐项一行，状态前缀 `[OK]`/`[WARN]`/`[ERROR]`（非 TTY 也保持，机器可读）：
+
+```text
+[OK]    根目录 ~/.gdit 存在且权限正确
+[WARN]  ~/.gdit/bin 不在 PATH —— 建议：export PATH="$HOME/.gdit/bin:$PATH"
+[ERROR] current 指向不存在的条目文件 instances/xxxx.toml —— 建议：gdit install 或 gdit default <name>
+[OK]    引擎资产 4.5.2-standard 完整
+...
+3 项正常，1 项警告，1 项错误
+```
+
+- TTY 下状态着色：OK 绿 / WARN 黄 / ERROR 红；`NO_COLOR` 或非 TTY 无色（复用 CLI 层
+  参数化的 TTY/着色判定，不依赖测试环境的真实终端）。
+- 退出码：0 = 无 error；1 = 存在 error；warn 不影响退出码。`--network` 探测失败按 warn
+  处理（网络故障与配置错误分离）。
+
+#### 交付范围
+
+1. core：`Doctor` 方法与 `DoctorReport` 结果类型；各检查项实现（复用 store/instance/
+   config/env/platform 只读能力，不复制规则）；新增 `platform` 检查项。
+2. platform 适配层拆分（§4.9）：能力化重构（ResolveRoot/AssetName/FindLauncher/SDKRID/
+   SDKArchiveFormat/PrepareLauncher/DisplayDriver/DetectFcitx/ShimPath/ReadCurrentLink/
+   WriteCurrentLink/RenameAtomic/AcquireLock/SyncDir/PathListSeparator 等按 OS 分文件）；
+   current 规范指针判定下沉为可复用只读检查（与读取路径共用）；Windows 实现（LockFileEx、
+   MoveFileEx、`godot.cmd` shim、current 重定向文件、zip SDK 资产、dotnet.exe launcher）；
+   把现有散落的平台判断（lock/CLI execve/store 封装）收敛进适配层。
+3. 根目录可配置：platform `ResolveRoot`（`GDIT_ROOT` 优先，须绝对路径）；CLI/GUI 生产
+   入口接入；doctor 的 root-dir 检查显示实际根目录与来源。
+4. 环境注入平台化：`[environment.<os>]` 平台小节配置读写与校验；`core/internal/env/`
+   按编译标签拆分平台注入实现（env_linux.go / env_darwin.go / env_windows.go）；
+   `EffectiveEnv` 合并平台小节并标注来源层级。
+5. CLI：`gdit doctor [--network] [--verbose]` 命令与渲染（状态前缀、着色、汇总、退出码、
+   平台化 PATH 提示模板）；Windows 下 `run` 走 spawn、shim 走 `godot.cmd`（调 `__shim` 入口）。
+6. 测试：单元（各检查项正反例；三平台纯映射函数固定输入覆盖）、core 集成（坏 current、
+   无效引擎/SDK 目录、坏条目、state 不一致、config 非法、权限 warn、环境脱敏、网络
+   探测 fixture）、CLI 集成（stdout/stderr 分流、着色参数化、退出码 0/1）。
+7. 实机验证：macOS Apple Silicon 实机、Windows x86_64 实机或 CI Windows runner
+   （行为测试；交叉编译只算构建检查）。
+
+#### 验收标准
+
+- 全新根目录、正常安装 + setup 后：全部检查 ok，退出码 0；无 current 时 current 项 warn。
+- 人为制造每种故障（悬空 current、非法 current 指针、坏条目、无效引擎/SDK 目录、
+  state 不一致、config 非法、自定义源模板非法、authorization_env 未设置）后逐项报
+  error/warn 且互不影响，退出码正确。
+- doctor 执行前后 gdit 根目录内容逐字节不变（零落盘）；不获取修改锁（与并发安装
+  并行执行不冲突）。
+- 默认执行不访问网络；`--network` 下 fixture 服务器可达/不可达分别报 ok/warn，全部
+  失败汇总 error，context 取消立即返回。
+- 敏感键掩码：含 token/secret/password/key 的变量值不完整出现在任何输出（含 --verbose）。
+- CLI 输出：结果在 stdout、着色符合 TTY/NO_COLOR 规则、退出码 0/1；非 TTY 纯文本可管道。
+- 根目录可配置：设置 `GDIT_ROOT` 后，doctor/install/list 等全部命令读写自定义根目录
+  （固定输入测试验证解析优先级与相对路径报错）；不设置时使用平台默认路径。
+- 环境平台化：`[environment.linux|darwin|windows]` 平台小节仅当前平台生效并覆盖全局
+  同名键，合并顺序与来源标注正确；非 Linux 平台 `display_driver`/`input_method`
+  非 `auto` 报配置错误；平台注入实现按编译标签拆分，业务代码零平台分支。
+- 平台行为：Linux amd64 全量验收；macOS Apple Silicon 实机验证（无 fcitx/display
+  检查、app bundle launcher、路径行为）；Windows x86_64 实机或 CI runner 验证
+  （`godot.cmd` shim、PATH 分号分隔、zip SDK 资产、MoveFileEx 原子写、LockFileEx
+  并发互斥、dotnet.exe launcher、current 重定向文件读写与非法内容判定）。
+- 业务代码零 `runtime.GOOS` 分支（`go vet` + review 检查）；纯映射函数（资产名/
+  launcher/RID/资产格式）在 Linux 上用固定输入覆盖三平台输出。
+- 默认测试不访问真实网络；`go test ./core/... ./cli/...`、`go vet` 与格式检查全部通过。
+
+#### 实现决策（建议，待 review）
+
+1. doctor 默认零网络、零落盘、不拿锁；`--network` 显式开启源可达性探测。
+   （建议：接受。）
+2. 退出码：0 = 无 error；1 = 存在 error；warn 与探测失败不影响退出码。
+   （建议：接受。）
+3. 环境变量值脱敏：敏感特征键名掩码，`--verbose` 不放开。（建议：接受。）
+4. 检查全部条目（不只 current）的引用完整性，引擎/SDK 引用缺失统一 error、消息区分。
+   （建议：接受。）
+5. 本阶段不提供 `--fix`/自动修复，doctor 只报告和建议；修复入口沿用现有命令
+   （`gdit setup`、`gdit sdk install` 等）。（建议：接受。）
+6. 默认输出全部检查项（OK 行简短），`--verbose` 展开细节。（建议：接受。）
+7. 第四阶段同时交付平台适配层拆分与 Windows 支持（§4.9）：doctor 检查项的平台
+   差异化与适配层能力化是同一工作的两面，Windows 验收在实机/CI runner 完成。
+   （建议：接受。）
+8. Windows shim 用 `godot.cmd` 包装而非复制 `godot.exe`（避免二进制同步问题）。
+   （建议：接受。）
+9. 非 Linux 平台 `display_driver`/`input_method` 只接受 `auto`，显式其他值报配置
+   错误（沿用「不注入 Linux 专用变量」哲学扩展为三平台）。（建议：接受。）
+10. 映射类平台函数（资产名/launcher/RID/资产格式）在 Linux 单测用固定输入覆盖
+    三平台；文件系统/进程/环境行为只在对应实机验收。（建议：接受。）
+11. 根目录可配置：`GDIT_ROOT` 环境变量优先（必须是绝对路径，否则配置错误），否则
+    平台默认路径（`~/.gdit/` / `%USERPROFILE%\.gdit`）；解析只发生在 platform
+    适配层 `ResolveRoot`，core 不读环境变量。（建议：接受。）
+12. 环境注入按平台配置：`[environment.linux|darwin|windows]` 平台小节仅当前平台
+    生效、覆盖全局同名键；`core/internal/env/` 按编译标签拆分平台注入实现
+    （env_linux.go / env_darwin.go / env_windows.go）。（建议：接受。）
+13. Windows 的 current 用普通重定向文件（内容为规范相对路径 `instances/<uuid>.toml`）
+    替代 symlink（零特权，不需要开发者模式）；Unix 保持 symlink；读写契约由
+    `ReadCurrentLink`/`WriteCurrentLink` 平台能力封装，core 层一致。
+    （建议：接受。）
+
 ## 10. Review 结论
 
 2026-08-17 已确认以下第一阶段决策。
@@ -1279,5 +1613,36 @@ EXAMPLE_VARIABLE = "value"    # 条目环境覆盖/新增（全局之下）
     CLI 和 GUI 不重复解析条目来补业务字段。
 20. 非交互条目安装用 `--current`/`--no-current` 表达显式选择，均未给出时使用“仅首个条目
     自动设为当前”的规则；core 用三态字段保留这一区别。
+
+2026-08 平台方向变更 review 记录（第四阶段规划）：
+
+21. 正式支持 Windows x86_64（验证级），平台矩阵改为 Linux amd64 主平台 + macOS Apple
+    Silicon / Windows x86_64 验证级支持；`display_driver`/`input_method` 非 Linux 平台
+    只接受 `auto`。（方向变更，AGENTS.md/PRD 已同步。）
+22. 平台适配层按 OS 拆分实现文件（`platform_unix.go`/`platform_linux.go`/
+    `platform_darwin.go`/`platform_windows.go`），业务代码零 `runtime.GOOS`；现有散落的
+    平台判断（lock/CLI execve/store 封装）随第四阶段下沉（见 §4.9）。（建议：接受。）
+23. Windows shim 用 `bin/godot.cmd` 包装（记录 `setup` 时实际 `gdit.exe` 的绝对路径并调用
+    `__shim %*`），不复制 `godot.exe`；`__shim` 与 Unix argv[0] 判断共用 runShim 逻辑
+    （参数直通、不过命令解析）。
+    （建议：接受。）
+24. Windows 原子写用 MoveFileEx(MOVEFILE_REPLACE_EXISTING)、锁用 LockFileEx
+    （均走 x/sys，零新增依赖）；无目录 fsync，一致性降级文档化。（建议：接受。）
+25. 2026-08 实测确认三平台资产命名：4.x 为 `win64.exe.zip`/`mono_win64.zip`（Windows）、
+    `macos.universal.zip`/`mono_macos.universal.zip`（macOS）；3.x 为
+    `win64.exe.zip`/`mono_win64.zip`（Windows）、`osx.universal.zip`/`mono_osx.universal.zip`
+    （macOS）；.NET SDK 的 Windows 资产为 zip（`dotnet-sdk-<v>-win-x64.zip`），
+    macOS 为 tar.gz。已写入 §4.6 与 §9.6。（建议：接受。）
+26. 纯映射平台函数（资产名/launcher/RID/资产格式）在 Linux 单测固定输入覆盖三平台；
+    文件系统/进程/环境行为在对应实机验收（macOS Apple Silicon 实机、Windows 实机或
+    CI Windows runner）。（建议：接受。）
+27. 数据根目录可配置：环境变量 `GDIT_ROOT` 优先（须绝对路径），否则平台默认路径
+    （`~/.gdit/` / `%USERPROFILE%\.gdit`）；Windows 用户可把数据放非系统盘；解析
+    只在 platform 适配层 `ResolveRoot`。（建议：接受。）
+28. 环境注入按平台配置：`[environment.linux|darwin|windows]` 平台小节仅当前平台生效、
+    覆盖全局；注入实现按编译标签拆分（env_linux.go / env_darwin.go / env_windows.go）。
+    （建议：接受。）
+29. Windows 的 current 改用普通重定向文件（内容为规范相对路径）替代 symlink，零特权；
+    Unix 保持 symlink；读写由平台能力封装，core 契约一致。（建议：接受。）
 
 框架完成后仍按项目约定先展示、review，得到用户明确的“可以”以后才能 commit。

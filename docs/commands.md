@@ -1,9 +1,9 @@
 # GoDoIt 命令参考（操作 ↔ 指令）
 
-> 状态：v0.2 第三阶段实施中（instances 条目层 + engine 资产层 + 环境注入 + .NET SDK + 资产 GC）
+> 状态：v0.2 第四阶段实现完成、发布候选验证中（doctor + 三平台适配层）
 > 本文档从用户操作视角列出所有指令与输出约定；设计语义以
 > [`docs/architecture/README.md`](architecture/README.md) 为唯一真理源。
-> 本文记录第三阶段命令面。第三阶段不保留第二阶段命令兼容层。
+> 本文记录截至第四阶段的命令面。第三阶段起不保留第二阶段命令兼容层。
 
 ## 1. 操作与指令对照
 
@@ -77,13 +77,21 @@
 
 ### 1.7 帮助
 
+| 操作 | 指令 | 说明 |
+|---|---|---|
+| 本地只读诊断 | `gdit doctor` | 检查平台、根目录、shim、current、条目、资产、环境、来源和 state；默认零网络、零落盘、不拿修改锁 |
+| 探测来源可达性 | `gdit doctor --network` | 额外探测启用来源；单来源失败为警告，全部失败为错误 |
+| 展开诊断细节 | `gdit doctor --verbose` | 展开环境变量来源、来源状态与修复建议；敏感值仍保持掩码 |
+
+### 1.8 帮助
+
 | 操作 | 指令 |
 |---|---|
 | 查看命令总览 | `gdit --help` / `gdit help` |
 
 ## 2. 输出与退出码约定
 
-- **stdout**：只输出结果（如 `installed instance work`、`default: work`、
+- **stdout**：只输出结果（如 `installed instance work`、`default: work`、doctor 报告、
   `removed instance work`、条目或资产列表），机器可读，tab 分隔。`list` 中当前条目的整行在
   TTY 下用品牌色（#3A73B0，truecolor 不支持时回退绿色，存在 `NO_COLOR` 时无色）高亮，
   非 TTY 保持纯文本。
@@ -117,13 +125,13 @@
 
 ## 3. 配置与数据目录
 
-所有数据在 `~/.gdit/`：
+所有数据默认在 `~/.gdit/`；设置绝对路径 `GDIT_ROOT` 后，以下布局整体迁移到该根目录：
 
 ```text
 ~/.gdit/
 ├── config.toml    # 唯一用户配置文件（来源、全局环境）
 ├── state.toml     # gdit 维护的已安装资产索引（可自动重建）
-├── current        # 指向 instances/<uuid>.toml 的相对 symlink
+├── current        # Unix 相对 symlink；Windows 为规范相对路径重定向文件
 ├── instances/     # 启动器条目：<uuid>.toml，文件内为显示名、引擎引用、SDK 策略与环境
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
@@ -142,10 +150,20 @@ name = "company-mirror"
 artifact_url = "https://mirror.example/{tag}/{asset}"
 checksum_url = "https://mirror.example/{tag}/SHA256SUMS.txt"
 authorization_env = "GDIT_COMPANY_MIRROR_TOKEN"
+
+[environment]
+display_driver = "auto"
+input_method = "auto"
+COMMON_VALUE = "global"
+
+[environment.windows]
+PLATFORM_VALUE = "windows-only"
 ```
 
 - 占位符只允许 `{version}`、`{tag}`、`{asset}`；URL 必须 HTTPS（localhost 测试除外）。
 - `gdit source use` / `source ban/unban` 写回会保留全部字段，注释不保留。
+- `[environment.linux|darwin|windows]` 仅在对应平台生效并覆盖全局同名键；macOS/Windows 的
+  `display_driver` 与 `input_method` 只接受 `auto`。
 
 ## 4. 快速上手
 
