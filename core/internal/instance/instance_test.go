@@ -330,6 +330,66 @@ func TestValidateTemplateMustMatchEngine(t *testing.T) {
 	}
 }
 
+func TestAppearanceIsBackwardCompatibleAndStrict(t *testing.T) {
+	item := validItem("work")
+	if IconStrategy(item) != IconDefault || ResolvedIcon(item) != IconGodot {
+		t.Fatalf("old standard instance must resolve to Godot: %+v", item)
+	}
+	item.Engine.Edition = "dotnet"
+	item.Dotnet = &Dotnet{Strategy: "managed", Version: "8.0.410"}
+	if ResolvedIcon(item) != IconCSharp {
+		t.Fatal("old dotnet instance must resolve to C#")
+	}
+	item.Appearance = &Appearance{Icon: IconCustom, CustomIcon: "../outside.png"}
+	if err := Validate(&item, item.ID+".toml"); err == nil {
+		t.Fatal("custom icon path traversal must be rejected")
+	}
+	item.Appearance.CustomIcon = item.ID + ".png"
+	if err := Validate(&item, item.ID+".toml"); err != nil {
+		t.Fatalf("canonical custom icon failed validation: %v", err)
+	}
+	item.Appearance = &Appearance{Icon: IconGodot, CustomIcon: item.ID + ".png"}
+	if err := Validate(&item, item.ID+".toml"); err == nil {
+		t.Fatal("preset icon must not retain custom_icon")
+	}
+	item.Appearance = &Appearance{Icon: IconGodot, Background: "transparent"}
+	if err := Validate(&item, item.ID+".toml"); err == nil {
+		t.Fatal("non-hex icon background must be rejected")
+	}
+	item.Appearance.Background = "#A179DC80"
+	if err := Validate(&item, item.ID+".toml"); err != nil {
+		t.Fatalf("eight-digit icon background failed validation: %v", err)
+	}
+}
+
+func TestSetAppearancePreservesUnknownFields(t *testing.T) {
+	root := t.TempDir()
+	installFixtureEngine(t, root, "4.5.2-standard", "godot")
+	item := validItem("work")
+	if err := Write(root, item); err != nil {
+		t.Fatal(err)
+	}
+	path := Path(root, item.ID)
+	content := "schema_version = 2\nid = \"" + item.ID + "\"\nname = \"work\"\nfuture_field = \"kept\"\n[engine]\nversion = \"4.5.2\"\nedition = \"standard\"\n[appearance]\nicon = \"godot\"\nfuture_appearance = \"kept-too\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAppearance(root, item.ID, IconCustom, "#A179DC"); err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["future_field"] != "kept" {
+		t.Fatalf("unknown field was lost: %+v", raw)
+	}
+	appearance, _ := raw["appearance"].(map[string]any)
+	if appearance["icon"] != IconCustom || appearance["custom_icon"] != item.ID+".png" || appearance["background"] != "#A179DC" || appearance["future_appearance"] != "kept-too" {
+		t.Fatalf("appearance was not written canonically: %+v", raw)
+	}
+}
+
 func TestRemoveDeletesByID(t *testing.T) {
 	root := t.TempDir()
 	installFixtureEngine(t, root, "4.5.2-standard", "godot")
@@ -337,11 +397,20 @@ func TestRemoveDeletesByID(t *testing.T) {
 	if err := Write(root, item); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "icons"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(IconPath(root, item.ID), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := Remove(root, item.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "instances", item.ID+".toml")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("instance file still exists: %v", err)
+	}
+	if _, err := os.Stat(IconPath(root, item.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("custom icon still exists: %v", err)
 	}
 	if err := Remove(root, "not-a-uuid"); err == nil {
 		t.Fatal("invalid id should be rejected")

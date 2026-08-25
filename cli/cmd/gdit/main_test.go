@@ -312,6 +312,57 @@ func TestRunWithoutArgsTTYNoInstancesGivesHint(t *testing.T) {
 	}
 }
 
+func TestGUIForwardsArgumentsAndExitCode(t *testing.T) {
+	originalResolver := resolveGUIExecutable
+	originalSpawn := spawnProcess
+	defer func() {
+		resolveGUIExecutable = originalResolver
+		spawnProcess = originalSpawn
+	}()
+	resolveGUIExecutable = func() (string, error) { return "/tmp/gdit-gui", nil }
+	var gotExecutable string
+	var gotArgs []string
+	var gotEnvironment []string
+	spawnProcess = func(executable string, args, environment []string, _, _ io.Writer) int {
+		gotExecutable = executable
+		gotArgs = append([]string(nil), args...)
+		gotEnvironment = append([]string(nil), environment...)
+		return 23
+	}
+
+	_, stderr, code := runCommand(t, fakeManager{}, "gui", "--test-arg", "value")
+	if code != 23 || stderr != "" {
+		t.Fatalf("unexpected GUI result: code=%d stderr=%q", code, stderr)
+	}
+	if gotExecutable != "/tmp/gdit-gui" || !reflect.DeepEqual(gotArgs, []string{"--test-arg", "value"}) || gotEnvironment != nil {
+		t.Fatalf("unexpected GUI launch: executable=%q args=%v environment=%v", gotExecutable, gotArgs, gotEnvironment)
+	}
+}
+
+func TestGUIReportsMissingExecutable(t *testing.T) {
+	originalResolver := resolveGUIExecutable
+	defer func() { resolveGUIExecutable = originalResolver }()
+	resolveGUIExecutable = func() (string, error) { return "", errors.New("GUI not found") }
+
+	_, stderr, code := runCommand(t, fakeManager{}, "gui")
+	if code != 1 || !strings.Contains(stderr, "GUI not found") {
+		t.Fatalf("unexpected missing GUI result: code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestFindGUIExecutableUsesConfiguredPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gdit-gui")
+	if err := os.WriteFile(path, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GDIT_GUI", path)
+
+	got, err := findGUIExecutable()
+	if err != nil || got != path {
+		t.Fatalf("unexpected configured GUI path: got=%q err=%v", got, err)
+	}
+}
+
 func TestSpawnProcessUsesProvidedEnvironment(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {

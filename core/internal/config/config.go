@@ -23,7 +23,28 @@ const (
 	DisplayDriverKey = "display_driver"
 	// InputMethodKey 是输入法控制键。
 	InputMethodKey = "input_method"
+	// DefaultTitlebarStyle 是跨平台顶栏的自动跟随系统值。
+	DefaultTitlebarStyle = "auto"
+	// TitlebarStyleMac 是左上角红黄绿交通灯风格。
+	TitlebarStyleMac = "mac"
+	// TitlebarStyleWindows 是右上角窗口控制按钮风格。
+	TitlebarStyleWindows = "windows"
 )
+
+// GUISettings 是 config.toml 中的 GUI 偏好设置。
+type GUISettings struct {
+	TitlebarStyle string `toml:"titlebar_style"`
+}
+
+// ValidateTitlebarStyle 校验顶栏风格值。
+func ValidateTitlebarStyle(style string) error {
+	switch style {
+	case DefaultTitlebarStyle, TitlebarStyleMac, TitlebarStyleWindows:
+		return nil
+	default:
+		return fmt.Errorf("titlebar_style must be auto, mac or windows")
+	}
+}
 
 // SourceEntry 描述配置中的一个来源。
 type SourceEntry struct {
@@ -220,6 +241,19 @@ func SetEnvironmentVariable(root, key, value string, remove bool) error {
 	return writeConfig(root, cfg)
 }
 
+// SetTitlebarStyle 设置 GUI 顶栏风格并原子写回配置。
+func SetTitlebarStyle(root, style string) error {
+	if err := ValidateTitlebarStyle(style); err != nil {
+		return err
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		return err
+	}
+	cfg.GUI.TitlebarStyle = style
+	return writeConfig(root, cfg)
+}
+
 // ValidateEnvironmentKey 校验环境键名可安全传给 execve。
 func ValidateEnvironmentKey(key string) error {
 	if key == "" || strings.ContainsAny(key, "=\x00") {
@@ -293,11 +327,28 @@ func writeConfig(root string, cfg File) error {
 	} else {
 		delete(configMap, "environment")
 	}
+	if _, existed := configMap["gui"]; existed || cfg.GUI.TitlebarStyle != DefaultTitlebarStyle {
+		configMap["gui"] = mergeGUISettings(configMap, cfg.GUI)
+	} else {
+		delete(configMap, "gui")
+	}
 	var builder strings.Builder
 	if err := toml.NewEncoder(&builder).Encode(configMap); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
 	return writeFileAtomic(path, builder.String())
+}
+
+// mergeGUISettings 覆盖已知 GUI 字段并保留配置文件中的未知字段。
+func mergeGUISettings(configMap map[string]any, settings GUISettings) map[string]any {
+	result := make(map[string]any)
+	if existing, ok := configMap["gui"].(map[string]any); ok {
+		for key, value := range existing {
+			result[key] = value
+		}
+	}
+	result["titlebar_style"] = settings.TitlebarStyle
+	return result
 }
 
 // isDefaultEnvironment 报告环境是否恰好等于默认控制键（display_driver/input_method 均为 auto，
@@ -407,6 +458,7 @@ type File struct {
 	DisabledSources []string       `toml:"disabled_sources"`
 	CustomSources   []CustomSource `toml:"custom_sources"`
 	Environment     Environment    `toml:"environment"`
+	GUI             GUISettings    `toml:"gui"`
 }
 
 // CustomSource 描述一个与 Godot 资产 URL 兼容的自定义镜像。
@@ -424,6 +476,7 @@ func Default() File {
 		SchemaVersion: defaultSchemaVersion,
 		SourceOrder:   []string{"godothub", "github"},
 		Environment:   Environment{Global: defaultEnvironment()},
+		GUI:           GUISettings{TitlebarStyle: DefaultTitlebarStyle},
 	}
 }
 
@@ -461,6 +514,12 @@ func Load(root string) (File, error) {
 		if _, ok := cfg.Environment.Global[InputMethodKey]; !ok {
 			cfg.Environment.Global[InputMethodKey] = "auto"
 		}
+	}
+	if cfg.GUI.TitlebarStyle == "" {
+		cfg.GUI.TitlebarStyle = DefaultTitlebarStyle
+	}
+	if err := ValidateTitlebarStyle(cfg.GUI.TitlebarStyle); err != nil {
+		return File{}, err
 	}
 	for sectionOS, section := range cfg.Environment.platformSections() {
 		for key, value := range section {

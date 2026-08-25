@@ -79,6 +79,7 @@ func (m *Manager) Doctor(ctx context.Context, network bool) (DoctorReport, error
 		m.checkShim,
 		m.checkCurrent,
 		m.checkInstances,
+		m.checkIcons,
 		m.checkEngines,
 		m.checkSDKs,
 		m.checkTemplates,
@@ -98,6 +99,57 @@ func (m *Manager) Doctor(ctx context.Context, network bool) (DoctorReport, error
 		return report, err
 	}
 	return report, nil
+}
+
+// checkIcons 检查自定义条目图标是否完整，并报告 icons/ 中没有条目引用的孤立文件。
+// 自定义图标故障只影响 GUI 展示，条目会回退到 edition 默认图标，因此状态为 warning。
+func (m *Manager) checkIcons(ctx context.Context, check doctorCheck) {
+	items, err := instance.ScanDefinitions(m.root)
+	if err != nil {
+		check("icons", StatusWarn, "条目集合无效，无法核对自定义图标引用", "先修复坏条目")
+		return
+	}
+	expected := make(map[string]string)
+	hasWarning := false
+	for _, item := range items {
+		if instance.IconStrategy(item) != instance.IconCustom {
+			continue
+		}
+		filename := item.ID + ".png"
+		expected[filename] = item.Name
+		if inspectErr := instance.InspectIcon(m.root, item.ID); inspectErr != nil {
+			hasWarning = true
+			check("icons", StatusWarn, fmt.Sprintf("条目 %s 的自定义图标缺失或无效：%v", item.Name, inspectErr), "重新导入图标或改用内置图标")
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(m.root, "icons"))
+	if errors.Is(err, os.ErrNotExist) {
+		if len(expected) == 0 {
+			check("icons", StatusOK, "无自定义条目图标", "")
+		}
+		return
+	}
+	if err != nil {
+		check("icons", StatusWarn, fmt.Sprintf("读取 icons/ 失败：%v", err), "检查目录权限")
+		return
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if _, referenced := expected[entry.Name()]; referenced {
+			continue
+		}
+		hasWarning = true
+		check("icons", StatusWarn, fmt.Sprintf("发现孤立自定义图标 %s", entry.Name()), "可手动删除该文件")
+	}
+	if !hasWarning && len(entries) == len(expected) {
+		if len(expected) == 0 {
+			check("icons", StatusOK, "无自定义条目图标", "")
+		} else {
+			check("icons", StatusOK, fmt.Sprintf("全部 %d 个自定义条目图标完整", len(expected)), "")
+		}
+	}
 }
 
 // checkPlatform 检查当前 OS/arch 是否在支持矩阵内。

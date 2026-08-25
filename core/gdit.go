@@ -336,6 +336,34 @@ func (m *Manager) Sources(ctx context.Context) ([]SourceInfo, error) {
 	return result, nil
 }
 
+// GUISettings 返回 GUI 窗口偏好，只读配置且不访问网络。
+func (m *Manager) GUISettings(ctx context.Context) (GUISettings, error) {
+	cfg, err := config.Load(m.root)
+	if err != nil {
+		return GUISettings{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	return GUISettings{TitlebarStyle: cfg.GUI.TitlebarStyle}, nil
+}
+
+// SetGUISettings 更新 GUI 窗口偏好并原子写回 config.toml。
+func (m *Manager) SetGUISettings(ctx context.Context, settings GUISettings) error {
+	if err := config.ValidateTitlebarStyle(settings.TitlebarStyle); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
+		return localIOError("create store root", err)
+	}
+	guard, err := lock.Acquire(ctx, store.New(m.root).LockPath())
+	if err != nil {
+		return contextOrLocalIOError("acquire store lock", err)
+	}
+	defer guard.Close()
+	if err := config.SetTitlebarStyle(m.root, settings.TitlebarStyle); err != nil {
+		return localIOError("update GUI settings", err)
+	}
+	return nil
+}
+
 // SetDefaultSource 把指定来源移到 source_order 首位并原子写回 config.toml。
 // 被禁用的来源不能设为默认。
 func (m *Manager) SetDefaultSource(ctx context.Context, name string) error {
@@ -628,7 +656,7 @@ func (m *Manager) Default(ctx context.Context) (InstanceInfo, error) {
 		}
 		return InstanceInfo{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	return instanceToPublic(item, true), nil
+	return instanceToPublic(m.root, item, true), nil
 }
 
 // SetDefault 原子地把指定显示名条目设为 current。

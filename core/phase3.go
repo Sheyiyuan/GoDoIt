@@ -82,7 +82,7 @@ func (m *Manager) InstallEntry(ctx context.Context, request InstallEntryRequest)
 		return result, localIOError("scan engine assets", err)
 	}
 	if findRecord(engines, engineID) == nil {
-		installed, installErr := m.installEngine(ctx, InstallRequest{Version: item.Engine.Version, Edition: item.Engine.Edition}, true)
+		installed, installErr := m.installEngine(ctx, InstallRequest{Version: item.Engine.Version, Edition: item.Engine.Edition, Source: request.Source}, true)
 		if installErr != nil {
 			return result, installErr
 		}
@@ -110,7 +110,7 @@ func (m *Manager) InstallEntry(ctx context.Context, request InstallEntryRequest)
 			return result, localIOError("scan templates", scanErr)
 		}
 		if findTemplateRecord(templates, templateID) == nil {
-			installedTemplate, installErr := m.installTemplateLocked(ctx, InstallTemplateRequest{Version: item.Engine.Version, Edition: item.Engine.Edition})
+			installedTemplate, installErr := m.installTemplateLocked(ctx, InstallTemplateRequest{Version: item.Engine.Version, Edition: item.Engine.Edition, Source: request.Source})
 			if installErr != nil {
 				return result, installErr
 			}
@@ -121,7 +121,7 @@ func (m *Manager) InstallEntry(ctx context.Context, request InstallEntryRequest)
 	if err := instance.Write(m.root, item); err != nil {
 		return result, localIOError("write instance", err)
 	}
-	result.Instance = instanceToPublic(item, false)
+	result.Instance = instanceToPublic(m.root, item, false)
 	if setCurrent {
 		if err := storeRoot.SetCurrent(item.ID); err != nil {
 			return result, localIOError("set current instance", err)
@@ -216,7 +216,7 @@ func (m *Manager) Instances(ctx context.Context) ([]InstanceInfo, error) {
 		installedTemplates[record.Manifest.ID] = true
 	}
 	for _, item := range items {
-		info := instanceToPublic(item, item.ID == current)
+		info := instanceToPublic(m.root, item, item.ID == current)
 		info.TemplateMissing = info.Template != "" && !installedTemplates[info.Template]
 		result = append(result, info)
 	}
@@ -267,7 +267,7 @@ func (m *Manager) RemoveInstance(ctx context.Context, name string) (RemoveInstan
 	if err := instance.Remove(m.root, target.ID); err != nil {
 		return RemoveInstanceResult{}, localIOError("remove instance", err)
 	}
-	return RemoveInstanceResult{Instance: instanceToPublic(*target, false), Orphans: orphans}, nil
+	return RemoveInstanceResult{Instance: instanceToPublic(m.root, *target, false), Orphans: orphans}, nil
 }
 
 // Orphans 返回当前无条目引用的引擎、托管 SDK 和导出模板资产。
@@ -760,8 +760,17 @@ func (m *Manager) changeEnv(ctx context.Context, name, key, value string, remove
 	return nil
 }
 
-func instanceToPublic(item instance.File, current bool) InstanceInfo {
-	result := InstanceInfo{ID: item.ID, Name: item.Name, Engine: item.Engine.Version + "-" + item.Engine.Edition, Edition: item.Engine.Edition, Current: current}
+func instanceToPublic(root string, item instance.File, current bool) InstanceInfo {
+	icon := instance.IconStrategy(item)
+	resolvedIcon := instance.ResolvedIcon(item)
+	iconMissing := false
+	if icon == instance.IconCustom {
+		if err := instance.InspectIcon(root, item.ID); err != nil {
+			resolvedIcon = instance.ResolvedIcon(instance.File{Engine: item.Engine})
+			iconMissing = true
+		}
+	}
+	result := InstanceInfo{ID: item.ID, Name: item.Name, Engine: item.Engine.Version + "-" + item.Engine.Edition, Edition: item.Engine.Edition, Current: current, Icon: icon, ResolvedIcon: resolvedIcon, IconMissing: iconMissing, IconBackground: instance.IconBackground(item)}
 	if item.Dotnet != nil {
 		result.SDKStrategy = item.Dotnet.Strategy
 		if item.Dotnet.Strategy == "managed" {

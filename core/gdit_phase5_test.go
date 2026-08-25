@@ -92,10 +92,14 @@ func TestTemplateBindingProtectsAssetAndDetachCreatesOrphan(t *testing.T) {
 		templateAsset: templateArchive(t, "4.5.2.stable"),
 	}
 	source := &templateFixtureSource{archives: archives}
-	manager := managerWithFixture(t, t.TempDir(), []Source{source}, archives)
-	installed, err := manager.InstallEntry(context.Background(), InstallEntryRequest{Name: "work", Version: "4.5.2", Edition: "standard", Template: true})
+	unselected := &stubSource{name: "unselected", err: SourceUnavailableError{Source: "unselected", Err: errors.New("must not be called")}}
+	manager := managerWithFixture(t, t.TempDir(), []Source{unselected, source}, archives)
+	installed, err := manager.InstallEntry(context.Background(), InstallEntryRequest{Name: "work", Version: "4.5.2", Edition: "standard", Source: source.Name(), Template: true})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if unselected.calls != 0 || len(source.requests) != 2 || source.requests[0].Kind != "engine" || source.requests[1].Kind != "template" {
+		t.Fatalf("entry install did not preserve selected source: unselected=%d requests=%+v", unselected.calls, source.requests)
 	}
 	if installed.Instance.Template != "4.5.2-standard" {
 		t.Fatalf("template was not bound: %+v", installed.Instance)

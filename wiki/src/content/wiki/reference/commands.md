@@ -30,6 +30,9 @@ updated: 2026-08-25
 | 创建 godot 入口 | `gdit setup` | Unix 创建 `godot` symlink，Windows 创建 `godot.cmd`；不改 shell 或系统 PATH |
 | 启动当前条目 | `gdit run [-- 参数]` / `-d` | 等价裸 `godot` |
 | 启动指定条目 | `gdit run <name> [-- 参数]` | 不改变 current |
+| 启动桌面 GUI | `gdit gui [参数]` | 启动配套的 `gdit-gui`，参数和退出码原样透传；可用 `GDIT_GUI` 指定路径 |
+
+仓库开发入口为 `make run`（构建并启动 GUI）；需要启动 CLI 时使用 `make run-cli <command>`。
 
 ## 引擎资产
 

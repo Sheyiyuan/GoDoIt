@@ -6,7 +6,8 @@ order: 0
 updated: 2026-08-25
 ---
 
-GoDoIt 当前处于 `v0.2`。第五阶段代码已经完成，正在进行发布候选验证。
+GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 实现，macOS Apple Silicon 与
+Windows x86_64 的 GUI 实机验证仍待完成。
 
 ## 当前已经实现
 
@@ -16,6 +17,7 @@ GoDoIt 当前处于 `v0.2`。第五阶段代码已经完成，正在进行发布
 - `gdit doctor` 本地诊断与显式网络探测
 - `gdit suggest` 项目只读分析与明确授权后的建议安装
 - 导出模板安装、绑定、引用保护和孤儿清理
+- Wails v2 + React 桌面工作台，与 CLI 共享同一个 core
 - Linux amd64 主支持，macOS arm64 与 Windows x86_64 验证级支持
 
 完整命令见 [命令参考](/wiki/reference/commands/)。
@@ -40,8 +42,11 @@ GoDoIt 不会保存项目路径、建立项目与条目的持久关联，也不�
 当前设计只管理并展示经过验证的模板资产路径，不修改 Godot 自身的用户目录，也不通过
 `XDG_DATA_HOME` 接管其他 Godot 数据。模板如何无侵入接入 Godot 的自动发现流程仍需上游事实核验。
 
-## 后续阶段
+## 第六阶段：Linux 已实现
 
-第六阶段提供 Wails GUI。GUI 将直接调用同一个 core，不复制安装、环境、SDK、来源或项目分析规则。
+Wails GUI 已提供条目浏览与安装、current/launch、模板、资源、Suggest、Doctor、来源、环境和
+关于页面。GUI 直接调用同一个 core，不复制安装、环境、SDK、来源或项目分析规则。Linux
+原生构建已通过；macOS Apple Silicon 与 Windows x86_64 仍需完成窗口、文件选择器、路径显示、
+键盘导航与高 DPI 布局的实机验收。
 
 最终需求以仓库的 `docs/requirements.md` 为准，技术设计以 `docs/architecture/README.md` 为唯一真理源。

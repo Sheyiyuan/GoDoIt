@@ -16,6 +16,43 @@ func TestLoadReturnsDefaultsWhenConfigIsMissing(t *testing.T) {
 	if cfg.SchemaVersion != 1 || len(cfg.SourceOrder) != 2 || cfg.SourceOrder[0] != "godothub" || cfg.SourceOrder[1] != "github" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
+	if cfg.GUI.TitlebarStyle != DefaultTitlebarStyle {
+		t.Fatalf("unexpected default titlebar style: %q", cfg.GUI.TitlebarStyle)
+	}
+}
+
+func TestSetTitlebarStyleKeepsUnknownGUIFields(t *testing.T) {
+	root := t.TempDir()
+	writeConfigFile(t, root, `schema_version = 1
+source_order = ["godothub", "github"]
+
+[gui]
+titlebar_style = "auto"
+future_option = "keep-me"
+`)
+	if err := SetTitlebarStyle(root, TitlebarStyleWindows); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GUI.TitlebarStyle != TitlebarStyleWindows {
+		t.Fatalf("unexpected titlebar style: %q", cfg.GUI.TitlebarStyle)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "future_option = \"keep-me\"") {
+		t.Fatalf("unknown GUI field was lost after write-back: %s", content)
+	}
+}
+
+func TestSetTitlebarStyleRejectsInvalidValue(t *testing.T) {
+	if err := SetTitlebarStyle(t.TempDir(), "linux"); err == nil {
+		t.Fatal("expected invalid titlebar style to be rejected")
+	}
 }
 
 func TestLoadRequiresSchemaVersion(t *testing.T) {

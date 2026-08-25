@@ -112,6 +112,7 @@ GoDoIt/
 - 使用 git flow 风格分支和约定式提交。
 - 不改动与当前任务无关的文件。
 
-当前实现状态为 `v0.2 第五阶段实施中`（suggest + 导出模板）。
-前四阶段已交付：资产来源与安装、启动与默认版本、instances/SDK/环境/GC，以及 doctor 与
-Linux/macOS/Windows 平台适配层。
+当前实现状态为 `v0.2 第六阶段 Linux 实现完成`（Wails v2 + React GUI）。
+前五阶段已交付：资产来源与安装、启动与默认版本、instances/SDK/环境/GC、doctor 与
+Linux/macOS/Windows 平台适配层，以及 suggest + 导出模板。macOS Apple Silicon 与
+Windows x86_64 的 GUI 实机验证仍待完成。

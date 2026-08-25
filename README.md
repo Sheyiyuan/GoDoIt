@@ -13,8 +13,9 @@
 
 GoDoIt（够独特）是一个简单易用的 Godot 引擎启动器与版本管理器。它把引擎和 .NET SDK 当作可校验、可复用的资产，把启动配置保存为 instances 条目，让 `godot` 在任意目录都启动当前条目。
 
-当前 `v0.2` 第五阶段已经完成，覆盖 `suggest` 与导出模板；第四阶段已交付 `doctor` 与
-Linux、macOS、Windows 平台适配。第六阶段将提供 Wails GUI。
+当前 `v0.2` 第六阶段已经完成 Linux 实现：除 `suggest`、导出模板、`doctor` 与三平台
+适配层外，现已提供共享同一 core 的 Wails v2 + React GUI。macOS Apple Silicon 与
+Windows x86_64 的 GUI 实机验证仍待完成。
 
 ## 为什么用 GoDoIt
 
@@ -49,6 +50,7 @@ godot --editor
 | 安装启动条目 | `gdit install <name> --version <version>` |
 | 查看和切换当前条目 | `gdit list`、`gdit default <name>` |
 | 启动引擎 | `gdit run [<name>] -- <engine args>` |
+| 启动桌面 GUI | `gdit gui [arguments]` |
 | 配置环境 | `gdit env set KEY=VALUE`、`gdit env unset KEY` |
 | 管理引擎资产 | `gdit engine list/install/remove` |
 | 管理托管 SDK | `gdit sdk list/available/install/remove` |
@@ -89,14 +91,17 @@ GoDoIt 的用户级数据默认放在 `~/.gdit/`，可用绝对路径环境变�
 
 当前发布候选已经覆盖引擎来源 fallback、SHA-256/SHA-512 校验、instances、环境注入、托管/系统 SDK、
 
-资产 GC、`doctor`、三平台适配层、项目建议与导出模板。GUI 属于第六阶段。
+资产 GC、`doctor`、三平台适配层、项目建议、导出模板，以及 Linux 上的 Wails GUI。
 
 ## 开发
 
 ```bash
 make check       # 格式检查、测试和 go vet
 make test-race   # 竞态检测
-make build       # 构建 bin/gdit
+make build       # 构建 bin/gdit 与 gui/build/bin/gdit-gui
+make build-gui   # 只构建 Wails GUI；Linux WebKit 标签可用 WAILS_BUILD_TAGS 覆盖
+make run         # 构建并启动 GUI
+make run-cli list # 构建并启动 CLI；命令参数直接跟在 run-cli 后
 GOOS=darwin GOARCH=arm64 go build -trimpath -o /tmp/gdit-darwin-arm64 ./cli/cmd/gdit
 ```
 

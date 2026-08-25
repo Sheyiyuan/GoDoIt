@@ -1,8 +1,8 @@
 # GoDoIt 架构设计
 
 
-> 状态为 v0.2 第五阶段实现完成、第六阶段 GUI 设计中（suggest + 导出模板）
-> 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段设计与验收草案见 §9.7。
+> 状态为 v0.2 第六阶段 Linux 实现完成，macOS Apple Silicon 与 Windows x86_64 GUI 实机验证待完成
+> 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段实现见 §9.7；第六阶段实现与验收约束见 §9.8。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
 第一阶段的产品边界、摘要信任模型、Go module 路径和 Linux amd64 支持范围已经确认，可以实施
@@ -423,6 +423,7 @@ id = "4.5.2-standard"     # 必须与 engine 的 version + edition 一致
 
 [appearance]              # 第六阶段可选：GUI 条目图标
 icon = "default"          # default | godot | csharp | mascot | custom
+background = "#A179DC"   # 可选；缺失/空值为透明，也接受 #RRGGBBAA
 # custom_icon = "3f2a9c1e-8b4d-4f2a-9c1e-8b4df2a9c1e8.png" # 仅 custom 时使用
 
 [env]                     # 条目级环境覆盖（FR-04 演进），全局 [environment] 之下
@@ -435,7 +436,8 @@ icon = "default"          # default | godot | csharp | mascot | custom
   `icon = "default"`：standard（普通版）解析为 Godot 图标，dotnet edition 解析为 C# 图标；
   Godot 3 mono 输入在 core 内归一化为 dotnet edition，因此同样解析为 C#。用户也可显式固定
   `godot`、`csharp`、`mascot` 或导入 `custom`。`custom_icon` 只接受与条目 UUID 一致的 PNG
-  文件名，并固定在 `icons/` 下解析，禁止绝对路径、`..` 和跨目录 symlink。
+  文件名，并固定在 `icons/` 下解析，禁止绝对路径、`..` 和跨目录 symlink。`background`
+  缺失或为空时透明，只接受 `#RRGGBB` 或 `#RRGGBBAA`。
 - **显示名与存储标识分离**：文件名是 UUID v4（`crypto/rand` 生成，零新增依赖），条目文件内的
   `id` 字段与文件名一致；`name` 是用户可见的显示名，只承担寻址和展示，不参与任何文件系统
   操作（因此 macOS 文件系统的 Unicode 正规化差异不会影响中文显示名的匹配）。
@@ -727,9 +729,11 @@ type InstallEntryRequest struct {
 	Name        string `json:"name"`                   // 条目显示名，必填，全仓库唯一，可中文
 	Version     string `json:"version"`                // 引擎版本，必填
 	Edition     string `json:"edition"`                // standard（默认）或 dotnet
+	Source      string `json:"source,omitempty"`       // GUI 可固定使用一个已启用来源；空值按配置 fallback
 	SDKStrategy string `json:"sdk_strategy,omitempty"` // 空=按 edition 默认（dotnet 为 managed）；managed | system
 	SDKVersion  string `json:"sdk_version,omitempty"`  // managed 时；空=映射表推荐 major 的最新可用 patch
 	SetCurrent  *bool  `json:"set_current,omitempty"`  // nil=自动；true=设为当前；false=不改变 current
+	Template    bool   `json:"template,omitempty"`     // 是否同时安装并绑定匹配导出模板
 }
 
 type SourceInfo struct {
@@ -1967,11 +1971,14 @@ error 诊断写 stderr；没有 `--install` 时即使存在分析 error 也以�
     元数据和摘要解析；平台资产命名与模板资产命名分别留在 platform/version 责任边界。
     （建议：接受。）
 
-### 9.8 第六阶段：Wails GUI 设计（FR-09）
+### 9.8 第六阶段：Wails GUI 实现（FR-09）
 
 第六阶段把已有 core 能力组合为一个桌面工作台，不新增项目管理语义，也不在 GUI 层复制
 版本解析、来源 fallback、SDK 求解、模板引用或平台判断。GUI 是 CLI 的另一种入口：Wails
 bridge 负责生命周期、参数转换和事件转发，React 只负责视图状态与用户确认。
+
+截至 2026-08-25，Linux 主平台实现与原生构建已经完成；macOS Apple Silicon 与 Windows
+x86_64 仍需按本节验收矩阵进行 GUI 实机验证，交叉编译不计入完成。
 
 #### 产品目标与边界
 
@@ -1984,6 +1991,33 @@ bridge 负责生命周期、参数转换和事件转发，React 只负责视图�
 5. GUI 不修改 shell 配置、系统 PATH、系统 dotnet 或 Godot 项目目录；设置页只写
    `~/.gdit/config.toml` 允许的字段。
 
+#### GUI 启动入口
+
+- `gdit gui [参数]` 启动与当前 CLI 配套的 `gdit-gui`，参数原样传给 GUI 进程；GUI 进程退出
+  后 CLI 返回相同的退出码。CLI 不创建 GUI 专属配置，也不通过网络查找 GUI。
+- GUI 可执行文件查找顺序为 `GDIT_GUI`（显式路径）、CLI 同目录、源码树中的
+  `gui/build/bin/gdit-gui`、当前目录下的同一路径，最后才查找 PATH 中的 `gdit-gui`。
+  macOS 应用包和 Windows `.exe` 均由启动器按固定候选路径识别。
+- `make run` 是仓库开发入口：先构建 GUI，再启动 `gui/build/bin/gdit-gui`；需要透传 CLI
+  参数时使用 `make run-cli <command> [ARGS=...]`。GUI 构建失败不得回退为启动 CLI。
+
+#### 无边框窗口与自定义顶栏
+
+- Wails 使用 `Frameless` 窗口，GUI 不显示系统自带窗口顶栏；React 顶栏通过 Wails 的
+  `--wails-draggable: drag` 区域实现拖动，最小化、最大化/还原和退出按钮调用 Wails
+  runtime，不在前端模拟窗口状态。
+- 顶栏风格设置写入唯一用户配置 `config.toml` 的 `[gui] titlebar_style`，值为
+  `auto`、`mac` 或 `windows`。`auto` 在 Linux/macOS 默认使用左上角红黄绿交通灯风格，
+  在 Windows 默认使用右上角的最小化、最大化和关闭按钮；用户可在设置页固定任一风格。
+- 顶栏按钮必须标注可访问名称并设置 `--wails-draggable: no-drag`，避免点击控件触发拖动；
+  无边框窗口仍保留 Wails 的可调整大小能力。
+- GUI 首屏和条目图标使用仓库实际品牌资源：GoDoIt 使用 `assets/logo.svg`，Godot 和
+  C# 使用各自官方仓库/品牌 SVG；应用窗口图标使用现有吉祥物透明 PNG 裁出的头像，生成
+  `gui/build/appicon.png` 与 Windows `gui/build/windows/icon.ico`。
+- 条目图标按圆形显示但不绘制边框，也不使用预设背景色；用户可在图标选择器设置背景色，写入条目
+  `[appearance] background`。字段缺失或空字符串表示透明，只接受 `#RRGGBB` 或
+  `#RRGGBBAA`，避免把任意 CSS 内容写入界面样式。
+
 #### 信息架构与路由
 
 桌面窗口采用“条目侧栏 + 选中条目内容区”布局，参考 XMCL 的实例工作流：条目是唯一的
@@ -1995,6 +2029,7 @@ bridge 负责生命周期、参数转换和事件转发，React 只负责视图�
 | `/instances` | 条目浏览、设为 current、启动、卸载；`+` 打开创建向导 | `Instances`、`SetDefault`、`RemoveInstance`、`ResolveLaunch` |
 | `/instances/:name` | 选中条目详情：运行时、环境、导出模板和操作记录 | `Default`、`EffectiveEnv`、`Templates`、`AttachTemplate`、`DetachTemplate` |
 | `/instances/new` | 创建条目向导：版本、edition、SDK、模板、current 确认 | `Available`、`AvailableSDKs`、`InstallEntry` |
+| `/tools` | 工具汇总页：项目建议、诊断和资源管理入口 | 读取 bootstrap 快照，不直接执行修改动作 |
 | `/resources/engines`、`/resources/sdks`、`/resources/sources`、`/resources/cache` | 二级资源管理；查看引用、来源和孤儿清理 | `List`、`SDKs`、`Sources`、`Orphans`、`AutoRemove` |
 | `/suggest` | 显式选目录、分析证据、安装建议 | `Suggest`、`InstallSuggestion` |
 | `/doctor` | 本地诊断、可选网络探测、按严重级别筛选 | `Doctor(false/true)` |
@@ -2003,8 +2038,12 @@ bridge 负责生命周期、参数转换和事件转发，React 只负责视图�
 侧栏条目列表的第一项固定为“新建条目”，头像位显示 `+`，点击进入创建向导；其后才是已有
 条目。每个条目使用固定 44px 图标位，支持缺省、Godot、C#、GoDoIt 吉祥物头像和自定义图标，
 当前条目用背景与文字标记高亮，不用状态点替代图标。
-`项目建议`、`诊断`、`设置`为少量辅助入口；`资源管理`是可展开的二级菜单，包含引擎、SDK、
-来源和缓存。当前条目变更后立即刷新侧栏和详情，不做页面级缓存。
+侧栏不直接展开项目建议、诊断或资源管理子项，只保留一个与`设置`、`关于`同级的`工具`入口；
+`工具`位于`设置`之前，点击进入独立的 `/tools` 汇总页。工具页沿用设置页的全宽分区布局，
+分别提供`项目建议`、`诊断`和`资源管理`入口；资源管理分区包含引擎、.NET SDK、下载来源、
+缓存与孤儿四个明确命令。进入 `/suggest`、`/doctor` 或 `/resources/:kind` 后，侧栏的`工具`
+入口保持选中状态，用户可直接返回汇总页。诊断 warning/error 数量显示在工具入口与工具页诊断项上，
+不为工具页额外触发网络检查。当前条目变更后立即刷新侧栏和详情，不做页面级缓存。
 
 #### 核心页面设计
 
@@ -2032,7 +2071,7 @@ dotnet、managed/system、SDK patch）→ `Template`（匹配模板、大小、�
 error 以阻断色显示并禁用安装，warning 不阻断但必须在 Review 中再次出现；路径只在本次
 React 状态中存在，Wails bridge 不写入持久配置。
 
-**资源管理**默认折叠在侧栏二级菜单中，分别查看 `Engines / SDKs / Sources / Cache`。
+**资源管理**从工具页的资源管理分区进入，分别查看 `Engines / SDKs / Sources / Cache`。
 模板不在这里作为日常入口展示，只在资源诊断或条目详情中作为条目依赖出现。资源页表格显示
 版本、来源、大小、引用条目和状态；`Auto remove` 先打开包含复查说明的确认对话框，成功后
 用 core 返回的实际删除清单刷新，不根据前端旧列表自行推断。

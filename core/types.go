@@ -14,6 +14,11 @@ type Options struct {
 	SDKProbe   func(context.Context) ([]SDKInfo, error)
 }
 
+// GUISettings 描述 GUI 在用户配置中保存的窗口偏好。
+type GUISettings struct {
+	TitlebarStyle string `json:"titlebar_style"`
+}
+
 // InstallRequest 描述一次引擎安装请求。
 type InstallRequest struct {
 	Version string `json:"version"`
@@ -26,6 +31,7 @@ type InstallEntryRequest struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	Edition     string `json:"edition"`
+	Source      string `json:"source,omitempty"`
 	SDKStrategy string `json:"sdk_strategy,omitempty"`
 	SDKVersion  string `json:"sdk_version,omitempty"`
 	SetCurrent  *bool  `json:"set_current,omitempty"`
@@ -156,6 +162,17 @@ type InstanceInfo struct {
 	Current         bool   `json:"current"`
 	Template        string `json:"template"`
 	TemplateMissing bool   `json:"template_missing"`
+	Icon            string `json:"icon"`
+	ResolvedIcon    string `json:"resolved_icon"`
+	IconMissing     bool   `json:"icon_missing"`
+	IconBackground  string `json:"icon_background"`
+}
+
+// SetInstanceIconRequest 描述一次条目图标策略变更。
+type SetInstanceIconRequest struct {
+	Icon       string `json:"icon"`
+	SourcePath string `json:"source_path,omitempty"`
+	Background string `json:"background,omitempty"`
 }
 
 // OrphanAsset 描述一个没有条目引用的资产。
