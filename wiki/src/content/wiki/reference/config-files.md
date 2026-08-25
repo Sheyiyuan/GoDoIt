@@ -3,7 +3,7 @@ title: 目录布局与配置
 description: ~/.gdit 下的文件、全局配置和实例条目格式。
 section: reference
 order: 2
-updated: 2026-08-21
+updated: 2026-08-25
 ---
 
 ## 目录布局
@@ -19,6 +19,7 @@ GoDoIt 的所有状态默认在用户级目录 `~/.gdit/` 中。Windows 默认�
 ├── instances/     # 启动器条目：<uuid>.toml，显示名在文件内
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
+├── templates/     # 第五阶段导出模板资产（当前尚未启用）
 └── tmp/           # 下载/解压临时目录（中断残留自动清理）
 ```
 
@@ -86,3 +87,15 @@ GAME_MODE = "debug"
   非 ASCII 文字（中文等）允许，空格、标点、符号、控制字符一律禁止；显示名全仓库唯一。
 - `[engine]` 引用创建后不可变。`[env]` 用 `gdit env` 修改，`[dotnet]` 策略需要手写或重建条目。
 - `standard` 条目不能带 `[dotnet]`。`managed` 条目必须写精确 `version`。
+
+## 第五阶段条目扩展（设计中）
+
+第五阶段计划在现有 schema 2 中加入可选模板引用，不改变既有条目的读取方式：
+
+```toml
+[template]
+id = "4.5.2-dotnet"
+```
+
+模板 ID 必须等于条目引擎的 `<version>-<edition>`。省略该 table 表示条目不依赖导出模板；模板
+资产缺失只影响导出能力，不阻断 `default` 或 `run`。当前版本尚不会创建、校验或使用该 table。

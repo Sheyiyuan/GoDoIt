@@ -30,6 +30,12 @@ import Base from "../layouts/Base.astro";
                         >先看 Wiki <ArrowUpRight size={16} stroke-width={1.8} aria-hidden="true" /></a
                     >
                 </div>
+                <div class="platform-support" aria-label="支持的平台">
+                    <span class="platform-label">支持平台</span>
+                    <span>Linux</span>
+                    <span>macOS</span>
+                    <span class="windows-platform">Windows</span>
+                </div>
                 <div class="hero-command" aria-label="示例命令">
                     <div class="command-label">第一次启动</div>
                     <code
@@ -234,9 +240,32 @@ import Base from "../layouts/Base.astro";
         }
         .hero-command {
             width: min(100%, 530px);
-            margin-top: 3.25rem;
+            margin-top: 1.5rem;
             border-top: 1px solid var(--line-strong);
             padding-top: 0.85rem;
+        }
+        .platform-support {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.45rem 1rem;
+            margin-top: 2.25rem;
+            color: var(--ink-faint);
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 0.72rem;
+            font-weight: 650;
+        }
+        .platform-label {
+            color: var(--accent-secondary);
+        }
+        .windows-platform {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .windows-platform img {
+            width: 15px;
+            height: 15px;
         }
         .command-label {
             margin-bottom: 0.35rem;
@@ -461,7 +490,10 @@ import Base from "../layouts/Base.astro";
                 font-size: 1rem;
             }
             .hero-command {
-                margin-top: 2.4rem;
+                margin-top: 1.4rem;
+            }
+            .platform-support {
+                margin-top: 1.8rem;
             }
             .hero-art {
                 min-height: 310px;

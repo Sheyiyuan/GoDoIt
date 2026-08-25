@@ -3,7 +3,7 @@ title: 切换当前条目与 godot 命令入口
 description: 查看和切换当前条目，并创建 godot 命令入口。
 section: how-to
 order: 2
-updated: 2026-08-19
+updated: 2026-08-25
 ---
 
 ## 查看当前条目
@@ -20,7 +20,8 @@ gdit default
 gdit default work-csharp
 ```
 
-GoDoIt 会原子更新 `~/.gdit/current` 软链接。更新失败时保留原链接。这个选择对所有目录一致，GoDoIt 不会根据项目目录自动切换。
+GoDoIt 会原子更新 `~/.gdit/current` 指针：Unix 使用相对 symlink，Windows 使用内容为规范相对
+路径的重定向文件。更新失败时保留旧值。这个选择对所有目录一致，GoDoIt 不会根据项目目录自动切换。
 
 ## 创建 godot 命令入口
 

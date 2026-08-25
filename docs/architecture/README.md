@@ -1,7 +1,7 @@
 # GoDoIt 架构设计
 
-> 状态为 v0.2 第四阶段实现完成、发布候选验证中（doctor + Linux/macOS/Windows 平台适配层）
-> 第四阶段 doctor（FR-08）验收见 §9.6；平台适配层与 Windows 支持约束见 §4.9。
+> 状态为 v0.2 第四阶段实现完成、第五阶段设计待 review（suggest + 导出模板）
+> 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段设计与验收草案见 §9.7。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
 第一阶段的产品边界、摘要信任模型、Go module 路径和 Linux amd64 支持范围已经确认，可以实施
@@ -413,6 +413,9 @@ edition = "standard"
 strategy = "managed"      # managed（默认，version 必填）| system（用系统 dotnet）
 version = "8.0.410"       # managed 必填，system 时忽略
 
+[template]                # 第五阶段可选：声明导出模板资产依赖
+id = "4.5.2-standard"     # 必须与 engine 的 version + edition 一致
+
 [env]                     # 条目级环境覆盖（FR-04 演进），全局 [environment] 之下
 # EXAMPLE_VARIABLE = "value"
 ```
@@ -433,14 +436,15 @@ version = "8.0.410"       # managed 必填，system 时忽略
   精确匹配寻址，永远无歧义。`default` 是普通显示名（交互安装的默认值）。
 - 命名条目本阶段开放：`gdit install` 交互式安装时确认条目显示名与配置（见 §9.5），
   `gdit remove <name>` 删除条目，`gdit run <name>`/`gdit default <name>` 按显示名使用。
-- 条目对引擎/SDK 的引用是**派生关系**：每次扫描 `instances/*.toml` 重算引用集合，
+- 条目对引擎/SDK/模板的引用是**派生关系**：每次扫描 `instances/*.toml` 重算引用集合，
   不维护独立引用状态文件（与 state.toml 可重建同一哲学）。
 - 条目创建后 `[engine]` 引用不可变（换引擎版本 = 建新条目）；`[env]` 用 `gdit env` 修改；
   `[dotnet]` 策略本阶段无专门修改命令，手写条目文件或重建条目。
 - 条目校验：`id` 是合法 UUID v4 且与文件名一致；`name` 非空、字符集合法且全仓库唯一；
   `[engine]` 引用必须存在对应完整安装；standard 条目出现 `[dotnet]` 表视为配置错误；
   `managed` 且 version 缺失/非法为配置错误，`system` 时忽略 version；`managed` 声明的版本
-  未安装属于启动错误（`ErrNoCompatibleSDK`），不属于配置错误。
+  未安装属于启动错误（`ErrNoCompatibleSDK`），不属于配置错误。第五阶段可选 `[template].id`
+  必须等于 engine 派生的模板 ID；模板资产缺失只影响导出能力，不使条目失效或阻断启动。
 - 引用扫描采用失败关闭：`instances/` 中只要存在不可读、不可解析、schema 不支持、id 与文件名
   不一致、显示名重复或不是普通文件的候选条目，引用扫描整体返回配置错误。`engine remove`、
   `sdk remove` 和 `autoremove` 在错误修复前不得删除任何资产，不能跳过坏条目后继续计算孤儿。
@@ -448,10 +452,9 @@ version = "8.0.410"       # managed 必填，system 时忽略
 #### 资产引用与 GC（apt 语义）
 
 - 引用来源只有条目：`[engine]` 引用引擎资产，`[dotnet].strategy = "managed"` 引用
-  `sdks/<version>/` 资产。
-- 引用保护：`gdit engine remove <id>` 删除资产前检查条目引用，被任何条目引用的引擎/SDK
-  拒绝删除（与 SDK remove、apt 依赖语义一致），提示由哪个条目引用；条目必须先删除
-  （`gdit remove <name>`）使资产变为孤儿。
+  `sdks/<version>/` 资产，第五阶段起可选 `[template]` 引用 `templates/<id>/` 资产。
+- 引用保护：资产删除前检查条目引用，被任何条目引用的引擎/SDK/模板拒绝删除，提示由哪个
+  条目引用；条目必须先删除，模板也可先从条目 detach，使资产变为孤儿。
 - `gdit remove <name>` 在锁内先完整校验条目集合，并按“排除目标条目”计算孤儿及空间；全部
   计算成功后才删除条目文件。返回这份同一临界区内的孤儿结果，在删除输出后列出提示：
   `以下资产已无引用，可用 gdit autoremove 清理`，并附每个资产的占用空间。当前条目拒绝删除
@@ -1003,7 +1006,7 @@ gdit sdk                              # 列出系统与托管 SDK
 gdit sdk available                    # 探测官方源可安装的 SDK 版本（按通道分组输出）
 gdit sdk install [<版本>]             # 安装托管 SDK；无参数 + TTY 时交互式两级选择（先大版本通道再具体 patch，枚举失败降级文本输入），非 TTY 无参数报用法错误
 gdit sdk remove [-y|--yes] <版本>     # 卸载托管 SDK（被条目引用的拒绝删除）
-gdit autoremove [-y|--yes]            # 删除无条目引用的引擎/SDK 资产（apt 语义）
+gdit autoremove [-y|--yes]            # 删除无条目引用的引擎/SDK 资产（第五阶段扩展到模板）
 
 # engine 命名空间（资产层，原命令降级封装）
 gdit engine                           # 列出已安装引擎资产（无参数 = list；与 gdit sdk 对称）
@@ -1556,6 +1559,398 @@ instance 的 `Scan`/`Lookup`/`Validate`、config 的 `Load`/`validateSources`、
 13. Windows 的 current 用普通重定向文件（内容为规范相对路径 `instances/<uuid>.toml`）
     替代 symlink（零特权，不需要开发者模式）；Unix 保持 symlink；读写契约由
     `ReadCurrentLink`/`WriteCurrentLink` 平台能力封装，core 层一致。
+    （建议：接受。）
+
+### 9.7 第五阶段：suggest + 导出模板（FR-06 / FR-07）
+
+第五阶段交付两项互相衔接但保持独立边界的能力：`suggest` 只读分析用户显式指定的 Godot
+项目并给出条目配置建议；`template` 管理与精确 Godot 版本匹配的官方导出模板资产。
+`suggest` 经用户明确授权后可编排既有条目安装和模板安装，但不会把项目路径写入条目、配置或
+状态，也不会形成“项目 → 条目”的持久关联。
+
+本阶段不引入项目自动切换、目录监听、项目清单或 GUI。GUI 仍在第六阶段，届时直接消费本节
+定义的 core 结果类型。模板资产与平台无关；平台相关下载、锁、原子发布能力继续复用第四阶段
+适配层，业务代码不增加 OS 分支。
+
+```text
+gdit suggest [<项目目录>]
+    [--install --name <条目名>]
+    [--sdk managed|system] [--sdk-version <精确版本>]
+    [--current|--no-current] [--no-template]
+
+gdit install <name> --version <版本> [既有选项] [--template]
+gdit template [list]
+gdit template install [--edition standard|dotnet] [--source <name>] <精确 Godot 版本>
+gdit template attach [--source <name>] <条目名>
+gdit template detach <条目名>
+gdit template remove [-y|--yes] [--edition standard|dotnet] <精确 Godot 版本>
+```
+
+- `suggest` 的目录缺省为当前目录；路径只用于本次调用，结果返回清理后的绝对路径但不持久化。
+- 默认先分析并完整报告。TTY 下随后询问是否安装（默认否），用户确认视为本次安装的明确授权，
+  再询问条目名与是否设为 current；非 TTY 不询问且永不安装。
+- `--install` 是跳过确认的脚本化明确授权。非 TTY 下必须同时给出 `--name`；TTY 下缺少名称时
+  交互询问。
+- `--sdk`、`--sdk-version`、`--current`、`--no-current` 与 `--no-template` 只允许和
+  `--install` 同时使用；SDK 参数继续服从 `InstallEntryRequest` 的 edition/策略校验。
+- 默认安装建议条目所需的引擎、托管 SDK（如有）和同版本导出模板；`--no-template` 仅跳过
+  模板，并使新条目不包含 `[template]` 引用。普通 `gdit install` 默认不安装模板，显式
+  `--template` 才安装并绑定；交互式安装询问是否需要导出模板，默认否。
+- `template install`/`remove` 只接受精确 Godot 版本，不接受条目名或 `m` 前缀；edition 默认
+  `standard`，C#/mono 模板显式用 `--edition dotnet`。`template` 不设简写。删除为不可逆操作，
+  确认规则与 `sdk remove` 一致；被条目引用时拒绝删除。
+- `template install` 是纯资产层动作，不创建条目引用；`template attach <name>` 从条目的 engine
+  派生模板 ID，缺少资产时先安装，再原子写入引用；`template detach <name>` 只移除引用并报告
+  新产生的孤儿，不直接删除资产。
+
+#### 项目只读分析
+
+新增 `core/internal/project/`，只负责固定范围内的格式解析和证据归一化，不做网络请求、安装、
+条目查找或版本选择。分析范围严格限制为用户给出的目录中的以下文件：
+
+1. 必需的 `project.godot`；它必须是普通文件或最终解析为普通文件的 symlink。
+2. 可选的同目录 `global.json`。
+3. 同目录按文件名排序的 `*.csproj`。本阶段不递归扫描子目录，也不向父目录查找
+   `global.json`，避免越过用户显式给出的项目边界。
+
+所有读取使用具名大小上限并响应 `context.Context` 取消；文件超限、不可读或语法损坏均返回带
+文件路径的诊断，不无限读取。分析前后不创建文件、不改 mtime、不持有 gdit 修改锁，且不读取
+`~/.gdit/current`。允许 symlink 时，解析后的文件仍必须位于清理后的项目目录内，不能借 symlink
+越过本次分析边界。
+
+`project.godot` 是 Godot Variant 文本格式，不按 TOML 解析，也不使用单个正则表达式猜测。
+`project` 包实现最小词法解析器：识别 section、键值、字符串转义、行尾分号注释，以及
+`PackedStringArray(...)`（Godot 4）和 `PoolStringArray(...)`（Godot 3）。只消费
+`[application]` 下的 `config/features`：
+
+- 唯一的 `MAJOR.MINOR` feature 是项目引擎系列；缺失或出现互相冲突的多个系列时标记为
+  error，禁止 `--install` 猜测。
+- feature 含 `C#` 时 edition 为 `dotnet`，否则为 `standard`。
+- 同目录存在 `.csproj` 但 feature 未含 `C#` 时，edition 提升为 `dotnet` 并报告 warning，
+  把“项目文件存在”作为比缺失 feature 更强的 C# 证据；feature 含 `C#` 但无 `.csproj`
+  同样 warning，但仍给出 dotnet 建议。
+
+`global.json` 使用 `encoding/json` 解析，只读取 `sdk.version`、`sdk.rollForward` 和
+`sdk.allowPrerelease`；未知字段忽略。`.csproj` 使用 `encoding/xml` 解析
+`TargetFramework`/`TargetFrameworks`，接受以 `netMAJOR.MINOR` 开头的目标框架（允许合法的
+平台后缀），多个目标取最高 major.minor 并保留全部证据。SDK 建议优先级为：
+
+1. `global.json` 中合法的精确 `sdk.version`；这是项目显式钉住的版本。
+2. `.csproj` 目标框架对应的 SDK major.minor 通道。
+3. 既有 `dotnet.RecommendedMajor`（Godot 系列 → 推荐 SDK 通道）保底映射。
+
+`global.json` 的 `rollForward`/`allowPrerelease` 在结果中作为证据和提示展示，本阶段不实现一套
+独立于 dotnet host 的完整 roll-forward 求解器：存在精确 `sdk.version` 时安装该版本；没有精确
+版本时按建议通道解析最新可用 patch。损坏的可选文件不静默忽略：报告 error，仍尽可能返回
+其余证据供用户查看，但 `--install` 在任何 error 存在时拒绝执行。只有 warning 不阻止安装。
+
+#### 建议结果与安装解析
+
+项目 feature 只声明引擎系列，不足以离线推导一个不存在的 patch。因此 `Suggest` 默认只返回
+需求约束，不联网伪造精确版本：
+
+```go
+type SuggestLevel string // warning | error
+
+type SuggestDiagnostic struct {
+    Level   SuggestLevel `json:"level"`
+    Code    string       `json:"code"`
+    Path    string       `json:"path,omitempty"`
+    Message string       `json:"message"`
+}
+
+type SuggestEvidence struct {
+    Kind  string `json:"kind"` // project-feature / global-json / target-framework
+    Path  string `json:"path"`
+    Value string `json:"value"`
+}
+
+type ProjectSuggestion struct {
+    ProjectDir   string              `json:"project_dir"`
+    EngineSeries string              `json:"engine_series"` // 如 4.5，不冒充精确 patch
+    Edition      string              `json:"edition"`       // standard / dotnet
+    SDKStrategy  string              `json:"sdk_strategy"`  // 非 dotnet 为空；默认 managed
+    SDKVersion   string              `json:"sdk_version"`   // global.json 精确版本，否则为空
+    SDKChannel   string              `json:"sdk_channel"`   // 如 8.0
+    Evidence     []SuggestEvidence   `json:"evidence"`
+    Diagnostics  []SuggestDiagnostic `json:"diagnostics"`
+    Installable  bool                `json:"installable"` // 无 error 且引擎系列明确
+}
+
+func (m *Manager) Suggest(ctx context.Context, dir string) (ProjectSuggestion, error)
+```
+
+`Suggest` 的“只读”包括 gdit 根目录：不初始化 `~/.gdit/`，不读取/重建 state，不获取锁，
+不访问来源。可归因于项目内容的错误进入 `Diagnostics`，方法仍返回部分结果和 nil Go error；只有
+路径解析、本地 I/O、context 取消等无法形成可信报告的失败才返回非 nil error。CLI 先完整输出
+证据、建议和诊断，再决定是否进入安装动作。
+
+安装动作由独立 core 编排承担，CLI 不复制版本选择、SDK 选择或模板安装规则：
+
+```go
+type InstallSuggestionRequest struct {
+    ProjectDir      string `json:"project_dir"`
+    Name            string `json:"name"`
+    SDKStrategy     string `json:"sdk_strategy,omitempty"`
+    SDKVersion      string `json:"sdk_version,omitempty"`
+    SetCurrent      *bool  `json:"set_current,omitempty"`
+    IncludeTemplate *bool  `json:"include_template,omitempty"` // nil 默认安装；false 对应 --no-template
+}
+
+type InstallSuggestionResult struct {
+    Suggestion    ProjectSuggestion  `json:"suggestion"`
+    EngineVersion string             `json:"engine_version"`
+    Entry         InstallEntryResult `json:"entry"`
+    Template      *TemplateInfo      `json:"template,omitempty"`
+}
+
+func (m *Manager) InstallSuggestion(ctx context.Context, request InstallSuggestionRequest) (InstallSuggestionResult, error)
+```
+
+`InstallSuggestion` 必须重新分析目录，不能直接信任调用方回传的 `ProjectSuggestion`。精确引擎
+版本按以下确定性顺序解析：
+
+1. 同系列、同 edition 的已安装引擎中选择最高稳定 patch；选择已安装资产时不联网。
+2. 本地没有匹配资产时，调用现有 `Available`，在来源元数据中选择同一 major.minor 系列的
+   最高稳定版本；不跨 minor，不自动选择预发布。
+3. 所有启用来源都无法枚举或系列无可用稳定版时返回错误，提示用户用普通
+   `gdit install <name> --version <精确版本>` 明确处理，不退回猜测版本。
+
+SDK 有 `global.json` 精确版本时原样交给条目安装；只有通道时通过既有 SDK 枚举/保底列表解析
+最新 patch。用户的 `--sdk`/`--sdk-version` 覆盖分析建议，但不绕过现有校验。Godot 3.x C#
+继续归一化为 mono 策略，不安装 .NET SDK。
+
+第五阶段为条目 schema 2 增加可选模板引用；这是向后兼容的可选字段，不提升 schema 版本：
+
+```toml
+[template]
+id = "4.5.2-dotnet"
+```
+
+table 存在即表示该条目需要匹配的导出模板；`id` 必须严格等于
+`<engine.version>-<engine.edition>`，不允许条目选择与引擎不同版本或 edition 的模板。省略 table
+表示条目没有模板依赖。新版本读取既有 schema 2 条目时按“未绑定模板”处理；第五阶段以前的
+旧二进制会忽略该 table，既有 `env set/unset` 的 map 合并写回会保留未知字段，且旧版 GC 不扫描
+`templates/`，因此不会误删或静默丢失绑定。旧版不会展示、校验或安装模板，版本降级后的能力缺失
+不属于兼容承诺。
+
+`InstallEntryRequest` 增加 `Template bool`，`InstanceInfo` 增加 `Template string`（未绑定为空，
+已绑定为模板 ID）。`instance.References` 增加 Templates 集合；引用始终从条目扫描派生，不另建
+索引。模板引用非法属于条目配置错误并触发失败关闭；引用合法但资产尚未安装不影响
+`default`/`run`，由 doctor 报告导出能力缺失。
+
+条目、引擎、SDK 和模板的写操作共用一次全局修改锁；实现时把现有条目/模板安装管线拆出
+`lockHeld` 内部入口，禁止递归获取同一锁。发布顺序为引擎 → SDK → 模板 → instance → current；
+每项发布都保持现有原子目录/文件语义。下载资产一旦成功发布不做危险回滚：后续步骤失败时返回
+已经发布的 `AssetChange`，未写 instance 就不会产生项目关联或坏条目，用户可重试或显式删除。
+
+#### 导出模板资产模型
+
+官方导出模板是平台无关 `.tpz`（ZIP）资产，但 standard 与 dotnet/mono 的模板不同；资产名称
+和 `version.txt` 都携带 edition 语义。名称规则为：
+
+```text
+稳定 standard    Godot_v{version}-stable_export_templates.tpz
+稳定 dotnet      Godot_v{version}-stable_mono_export_templates.tpz
+预发布 standard  Godot_v{version}_export_templates.tpz
+预发布 dotnet    Godot_v{version}_mono_export_templates.tpz
+```
+
+`version`/`edition` 使用与引擎相同的规范化规则，模板资产 ID 为
+`<version>-<standard|dotnet>`。来源层扩展通用资产请求，不把模板名塞入 platform 适配层：
+
+```go
+type SourceRequest struct {
+    Kind      string `json:"kind"`       // engine / template
+    Version   string `json:"version"`
+    Edition   string `json:"edition,omitempty"`
+    AssetName string `json:"asset_name"`
+    Target    Target `json:"target,omitempty"`
+}
+```
+
+这是对现有公开 `SourceRequest` 的向后兼容字段扩展，不另造一套 provider 接口：引擎请求继续由
+platform 生成 `AssetName` 和 `Target`，模板请求由版本层根据 edition 生成平台无关资产名，target
+保持零值。`providerAdapter.Resolve` 直接把调用方已生成的 `AssetName` 传给现有内部
+`source.ResolveRequest`，不再二次调用 `platform.AssetName`；注入的 fixture `Source` 因而能用同一
+接口覆盖 engine/template。内置 GodotHub、GitHub 和现有 `{asset}` 自定义源复用同一元数据、认证、
+fallback 与摘要契约：来源不可用可尝试下一个来源；摘要不匹配或清单损坏立即停止，不能 fallback。
+`Available` 仍只枚举引擎，不把模板伪装成 edition。
+
+```text
+~/.gdit/templates/
+└── <version>-<edition>/
+    ├── install.toml
+    └── payload/                 # .tpz 内顶层 templates/ 的内容
+        ├── version.txt
+        └── ...                  # 官方各目标平台的 debug/release 模板
+```
+
+```toml
+# templates/<version>-<edition>/install.toml
+schema_version = 1
+id = "4.5.2-standard"
+version = "4.5.2"
+edition = "standard"
+source = "github"
+archive_name = "Godot_v4.5.2-stable_export_templates.tpz"
+checksum_algorithm = "sha512"
+checksum = "..."
+installed_at = "2026-08-25T00:00:00Z"
+```
+
+安装流程复用 `tmp/operation-*`、context 取消、进度事件和 ZIP 安全解压：校验摘要后只接受单个
+顶层 `templates/`，要求 `version.txt` 存在且声明版本与请求的版本/status/mono 标记一致（例如
+`4.5.2.stable` 或 `4.5.2.stable.mono`），拒绝空包、越界路径、symlink 与重复目标；写完 manifest
+后原子发布到 `templates/<version>-<edition>/`。目录已存在时仅在完整 manifest 与 payload 校验
+通过时返回 `ErrAlreadyInstalled`；坏目录不覆盖，由 doctor 报告并提示用户处理。
+
+```go
+type TemplateInfo struct {
+    ID                string   `json:"id"`
+    Version           string   `json:"version"`
+    Edition           string   `json:"edition"`
+    Source            string   `json:"source"`
+    ChecksumAlgorithm string   `json:"checksum_algorithm"`
+    Checksum          string   `json:"checksum"`
+    ArchiveName       string   `json:"archive_name"`
+    Path              string   `json:"path"`
+    Size              int64    `json:"size"`
+    InstalledAt       string   `json:"installed_at"`
+    References        []string `json:"references"` // 引用该模板的条目显示名，按名称排序
+}
+
+type InstallTemplateRequest struct {
+    Version string `json:"version"`
+    Edition string `json:"edition"`          // 空值归一化为 standard
+    Source  string `json:"source,omitempty"` // 非空时禁用 fallback
+}
+
+type TemplateBindingResult struct {
+    Instance  InstanceInfo  `json:"instance"`
+    Template  *TemplateInfo `json:"template,omitempty"`
+    Installed bool          `json:"installed"`
+    Orphans   []OrphanAsset `json:"orphans,omitempty"`
+}
+
+func (m *Manager) Templates(ctx context.Context) ([]TemplateInfo, error)
+func (m *Manager) InstallTemplate(ctx context.Context, request InstallTemplateRequest) (TemplateInfo, error)
+func (m *Manager) RemoveTemplate(ctx context.Context, version, edition string) (TemplateInfo, error)
+func (m *Manager) AttachTemplate(ctx context.Context, name, source string) (TemplateBindingResult, error)
+func (m *Manager) DetachTemplate(ctx context.Context, name string) (TemplateBindingResult, error)
+```
+
+模板不加入 `state.toml`：模板列表直接按 manifest 扫描，避免扩大 state schema；这不影响引用
+保护，引用集合仍由条目扫描派生。`template remove` 在锁内扫描全部条目，被引用时返回
+`ErrAssetInUse`。未被任何条目引用的完整模板属于孤儿，进入 `Orphans` 和 `autoremove`；
+`autoremove` 确认后必须像引擎/SDK 一样在锁内复查模板引用，只删除复查时仍为孤儿的模板。
+
+`AttachTemplate` 在同一锁内校验条目、安装缺失资产并原子改写条目；已经绑定同一 ID 时幂等成功。
+`DetachTemplate` 原子移除 `[template]`，未绑定时幂等成功；detach 不删除资产，而是在结果中返回
+同一临界区计算的孤儿快照。current 指向的条目也允许 attach/detach，因为模板不参与启动解析。
+
+本阶段只管理、校验和定位模板资产，不修改 Godot 自身的用户数据目录，也不创建
+`~/.local/share/godot` 等外部 symlink。尤其不通过注入 `XDG_DATA_HOME` 强制 Godot 发现模板，
+因为这会同时重定向 Godot 的其他用户数据，违反“环境注入最小化”和“所有管理数据在
+`~/.gdit/`”的边界。将模板接入 Godot 导出流程必须另行确认一个上游支持的、不会接管全部用户
+数据的机制；确认前 CLI/GUI 把 `TemplateInfo.Path` 作为已验证资产位置展示。
+
+#### doctor 与 CLI 输出
+
+第四阶段 doctor 的 `templates` 检查项在本阶段升级为正式校验：扫描每个一级目录，验证版本目录
+名（版本 + edition）、manifest、摘要字段、`payload/version.txt` 和非空 payload。每个坏目录报
+error，合法模板按版本报告 ok；目录不存在或为空是 ok。doctor 仍不修改、不重建模板目录，也不
+访问网络。instances 检查同时验证模板 ID 与 engine 一致；绑定模板缺失记为 warn 并提示
+`gdit template attach <name>`，不记为启动错误，不影响 `default`/`run`。
+
+`suggest` 的 stdout 先输出稳定字段（项目目录、引擎系列、edition、SDK 建议、证据），warning/
+error 诊断写 stderr；没有 `--install` 时即使存在分析 error 也以退出码 1 结束并保留可用报告。
+安装进度继续写 stderr，最终创建的条目、实际精确引擎版本及模板 ID 写 stdout。`template list`
+输出 `id/version/edition/source/size/references/installed_at`，非 TTY 为 tab 分隔纯文本。
+`template detach` 与 `gdit remove` 一样在 stdout 报告解除绑定，随后列出新产生的孤儿提示。
+普通 `gdit list` 增加 template 列：未绑定显示 `-`，已绑定显示模板 ID，资产缺失追加 `missing`。
+
+#### 交付顺序
+
+代码落地前先通过以下闸门，任一项未完成都不开始模板 store/source 实现：
+
+1. 先同步仓库级 `AGENTS.md` 的阶段状态与平台范围：当前文件仍写“第三阶段实施中、不支持
+   Windows”，与 PRD、本架构及已落地的平台代码冲突；实现与验收只能服从一套明确约束。
+2. 用户完成本节 review，尤其确认“suggest 默认附带模板”与“只管理已验证模板路径、不改 Godot
+   用户目录”两项产品语义。
+3. 用至少一个当期官方稳定 release 核验 standard/dotnet 资产名、`.tpz` 顶层目录和
+   `version.txt` 内容；把核验结果固化为小型 fixture。若上游事实与本节不同，先修订架构再编码。
+4. 记录当前 `go test ./core/... ./cli/...`、race 与 vet 基线；第五阶段失败必须能区分存量问题与
+   本阶段回归。
+
+通过闸门后的实现顺序如下：
+
+1. `core/internal/project`：Godot Variant 最小解析器、global.json/`.csproj` 结构化解析、证据与
+   诊断模型；先用固定 fixture 锁定只读边界。
+2. 模板资产层：版本/资产名规则、store manifest 扫描、来源解析、摘要校验、安全解压、原子
+   install/list/remove；升级 doctor templates 检查。
+3. 条目引用层：schema 2 可选 `[template]`、引用扫描/保护、孤儿计算、attach/detach 和
+   autoremove 模板复查；保持 run/default 忽略模板缺失。
+4. core 编排：`Suggest`、精确版本解析、`InstallSuggestion`，并把现有安装逻辑整理为可复用的
+   锁内入口；普通 `InstallEntry` 仅新增显式 Template 选项，默认行为不变。
+5. CLI：`suggest` 与 `template` 命令、普通 install 的 `--template`、TTY 确认、stdout/stderr、
+   退出码和进度展示。
+6. 同步 `docs/requirements.md`、`docs/commands.md`、README 与 Wiki 的已实现命令面；第六阶段
+   GUI 设计只依赖本节公共 API，不回填业务规则。
+
+#### 验收标准
+
+- Godot 3/4 的 `PoolStringArray`/`PackedStringArray` fixture 能正确识别系列和 C#；注释、转义、
+  键名相似文本不会误判。缺失/冲突 feature、损坏 JSON/XML、超限文件产生稳定诊断。
+- `global.json` 精确 SDK、单/多目标 `.csproj`、Godot 推荐映射的优先级固定；Godot 3.x C#
+  不建议或安装 .NET SDK。
+- 默认 `suggest` 不访问网络、不读写 gdit 根目录、不拿锁；项目目录执行前后的文件集合、内容、
+  mode 和 mtime 完全一致，current 也不改变。
+- `--install` 只选择同 major.minor 的最高稳定版；本地命中零网络，远端枚举使用 fixture；
+  无稳定匹配时失败且不跨系列、不选预发布。
+- 非 TTY 未带 `--install` 永不安装；`--install` 缺 `--name` 报用法错误；TTY 确认默认否。
+- standard/mono 模板资产名与 `version.txt` 匹配规则有固定 fixture；来源 fallback、指定来源、
+  摘要失败、中断、坏 `.tpz`、重复安装、原子发布和删除确认均有固定 fixture 测试，默认测试
+  不访问公网；注入的公共 `Source` fixture 必须同时断言收到的 `Kind`、`AssetName` 与零值/非零值
+  `Target`，避免 provider adapter 重新引入平台资产名拼接。
+- `InstallSuggestion` 中后续步骤失败时不留下半写 instance/current；已原子发布的资产在结果中
+  明确报告，可安全重试。并发安装受同一全局锁串行化，不发生嵌套锁死。
+- `[template].id` 与 engine 精确匹配；多个条目可共享一个模板。template remove 对引用资产失败
+  关闭并列出引用条目，detach 后资产成为孤儿，删除条目也会正确产生模板孤儿。
+- `autoremove` 把模板与引擎/SDK 一同列出并在确认后锁内复查；坏条目存在时不删除任何模板，
+  并发 attach 不会误删刚获得引用的模板。
+- 模板缺失不阻断 default/run，doctor 报 warn；非法或错配模板 ID 是配置 error。doctor 能区分
+  合法模板与坏目录，执行前后 templates 内容逐字节不变；`state.toml` 不因模板操作改变。
+- CLI 结果/诊断/进度分别进入 stdout/stderr，退出码遵循 0/1/2 约定；core 结果类型均有 json tag。
+- 默认测试不访问真实网络；`go test ./core/... ./cli/...`、race、vet 与格式检查全部通过；模板
+  资产名和归档布局再用至少一个当期官方 release 实测确认，live 验证不能替代 fixture。
+
+#### 实现决策（建议，待 review）
+
+1. `suggest` 默认严格本地只读、零网络；只在明确安装动作中为精确 patch 访问来源。
+   （建议：接受。）
+2. 项目分析只读指定目录的三个文件类别，不递归、不向父目录查找 `global.json`。
+   （建议：接受。）
+3. feature 只给出 major.minor；安装时优先最高已安装稳定 patch，否则枚举来源，永不跨 minor 或
+   自动选预发布。（建议：接受。）
+4. `global.json` 精确版本优先；没有精确版本时才按 target framework 或 Godot 映射解析 SDK
+   通道。本阶段不重写 dotnet host 的 roll-forward 求解器。（建议：接受。）
+5. `suggest --install` 默认同时安装匹配模板，`--no-template` 可关闭；项目路径不写入任何
+   gdit 持久文件。（建议：接受。）
+6. 模板按版本 + edition 独立存储，并作为条目的可选显式依赖；引用 ID 必须从 engine 精确派生。
+   （用户已确认。）
+7. 模板复用 Godot 来源及摘要信任，`.tpz` 校验后安全解压并原子发布；摘要失败不 fallback。
+   （建议：接受。）
+8. 不注入 `XDG_DATA_HOME`、不修改 Godot 用户目录来实现模板发现；本阶段只提供已验证模板路径，
+   上游支持的无侵入接入方式确认后再扩展。（建议：需重点确认。）
+9. `suggest` 分析 error 阻止安装但仍返回部分报告；warning 只提示不阻止。
+   （建议：接受。）
+10. 组合安装共用一次全局锁，不回滚已发布资产；失败结果必须准确列出已发布内容。
+    （建议：接受。）
+11. 被条目引用的模板拒绝删除；detach 或删除条目后进入孤儿集合，由 autoremove 锁内复查清理。
+    模板缺失只影响导出能力，不阻断引擎启动。（用户已确认绑定方向；建议接受此生命周期。）
+12. 扩展现有公开 `SourceRequest` 传入 `Kind` 与已生成的 `AssetName`，内部 provider 只负责 URL、
+    元数据和摘要解析；平台资产命名与模板资产命名分别留在 platform/version 责任边界。
     （建议：接受。）
 
 ## 10. Review 结论

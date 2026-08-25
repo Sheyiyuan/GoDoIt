@@ -3,7 +3,7 @@ title: 配置输入法与显示环境
 description: 设置 fcitx、显示驱动和条目自己的环境变量。
 section: how-to
 order: 3
-updated: 2026-08-19
+updated: 2026-08-25
 ---
 
 启动引擎时，GoDoIt 依次合并父进程环境、全局配置、条目配置和派生变量。合并结果只传给这次启动的引擎子进程。
@@ -59,6 +59,8 @@ gdit env --instance work
 
 输出会列出每个变量的值及其来源，包括 `global`、`instance` 和 `derived`。
 
-## macOS 注意
+## macOS 与 Windows
 
-macOS 会跳过 fcitx 和显示驱动等 Linux 专用处理。macOS Apple Silicon 仍需实机完成行为验收。
+macOS 与 Windows 都会跳过 fcitx 和显示驱动等 Linux 专用处理；对应平台配置中的
+`display_driver` 与 `input_method` 只接受 `auto`。macOS 和 Windows 属于验证级
+支持，Linux 仍是主支持平台。
