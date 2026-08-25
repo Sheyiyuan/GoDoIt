@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">GoDoIt 条目优先 GUI 设计稿</title>
+  <desc id="desc">参考 XMCL 实例工作流，以条目为一级主题，基础资源置于二级菜单，导出模板在条目中管理。</desc>
+  <defs>
+    <clipPath id="mascotAvatar"><circle cx="48" cy="425" r="22"/></clipPath>
+  </defs>
+  <rect width="1600" height="1000" fill="#F5F7F9"/>
+  <rect width="1600" height="60" fill="#FFFFFF"/>
+  <line x1="0" y1="60" x2="1600" y2="60" stroke="#DDE3E8"/>
+  <circle cx="26" cy="30" r="7" fill="#E76B62"/><circle cx="50" cy="30" r="7" fill="#E7B34B"/><circle cx="74" cy="30" r="7" fill="#53B47D"/>
+  <circle cx="116" cy="30" r="17" fill="#2384D8"/><path d="M108 30l8-9 9 9-9 9z" fill="#FFF"/>
+  <text x="144" y="37" font-family="Inter,Arial,sans-serif" font-size="19" font-weight="700" fill="#1D2733">GoDoIt</text>
+  <text x="232" y="37" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">够独特</text>
+  <circle cx="1518" cy="30" r="16" fill="#EEF2F5"/><path d="M1512 24l12 12M1524 24l-12 12" stroke="#697783" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- 条目主侧栏 -->
+  <rect x="0" y="60" width="332" height="940" fill="#FFFFFF"/>
+  <line x1="332" y1="60" x2="332" y2="1000" stroke="#DDE3E8"/>
+  <text x="28" y="111" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="700" fill="#1D2733">条目</text>
+  <text x="28" y="141" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">选择一个配置并启动 Godot</text>
+  <!-- 顶部固定的新建项 -->
+  <rect x="16" y="158" width="300" height="60" rx="6" fill="#F6F9FB" stroke="#DCE4EA"/>
+  <circle cx="48" cy="188" r="22" fill="#E8F3FC"/>
+  <path d="M39 188h18M48 179v18" stroke="#2384D8" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="82" y="193" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#2384D8">新建条目</text>
+
+  <!-- C# 预设图标 -->
+  <rect x="16" y="230" width="300" height="72" rx="6" fill="#EAF4FD"/>
+  <rect x="16" y="230" width="4" height="72" rx="2" fill="#2384D8"/>
+  <circle cx="48" cy="266" r="22" fill="#7148B8"/><text x="48" y="272" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#FFF">C#</text>
+  <text x="82" y="259" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#1D2733">studio-csharp</text>
+  <text x="82" y="283" font-family="Inter,Arial,sans-serif" font-size="12" fill="#5F7180">4.5.2 · .NET · 缺省</text>
+  <text x="278" y="259" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700" fill="#2384D8">当前</text>
+
+  <!-- Godot 预设图标 -->
+  <circle cx="48" cy="345" r="22" fill="#478CBF"/>
+  <path d="M34 346l3-11 6 4 5-8 5 8 6-4 3 11v9H34z" fill="#FFF"/>
+  <circle cx="42" cy="347" r="2" fill="#478CBF"/><circle cx="54" cy="347" r="2" fill="#478CBF"/><path d="M42 353c4 3 8 3 12 0" fill="none" stroke="#478CBF" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="82" y="338" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#25313C">stable-4.4</text><text x="82" y="362" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">4.4.1 · 普通版 · 缺省</text>
+
+  <!-- GoDoIt 吉祥物头像 -->
+  <circle cx="48" cy="425" r="23" fill="#EAE8FB"/>
+  <image href="mascot.png" x="17" y="402" width="62" height="142" preserveAspectRatio="none" clip-path="url(#mascotAvatar)"/>
+  <text x="82" y="418" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#25313C">legacy-mono</text><text x="82" y="442" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">3.6.2 · Mono</text>
+
+  <!-- 自定义图标 -->
+  <rect x="26" y="483" width="44" height="44" rx="10" fill="#D35E88"/>
+  <path d="M32 517l10-13 7 8 5-6 10 11z" fill="#FFF" opacity="0.9"/><circle cx="58" cy="494" r="4" fill="#FFD768"/>
+  <text x="82" y="499" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#25313C">自定义工作台</text><text x="82" y="523" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">4.6.1 · 自定义图标</text>
+
+  <line x1="24" y1="552" x2="308" y2="552" stroke="#E6EAEE"/>
+  <text x="28" y="582" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" fill="#83919D">工具</text>
+  <path d="M31 606h16M31 613h16M31 620h10" stroke="#738391" stroke-width="2" stroke-linecap="round"/><text x="64" y="617" font-family="Inter,Arial,sans-serif" font-size="14" fill="#42525F">项目建议</text>
+  <path d="M30 646h18M30 653h18M30 660h18" stroke="#738391" stroke-width="2" stroke-linecap="round"/><circle cx="46" cy="646" r="4" fill="#E58B35"/><text x="64" y="657" font-family="Inter,Arial,sans-serif" font-size="14" fill="#42525F">诊断</text>
+
+  <!-- 二级资源菜单 -->
+  <rect x="16" y="684" width="300" height="192" rx="6" fill="#F6F8FA"/>
+  <path d="M31 708l7 7 7-7" fill="none" stroke="#60717F" stroke-width="2"/>
+  <text x="60" y="720" font-family="Inter,Arial,sans-serif" font-size="14" font-weight="700" fill="#33424E">资源管理</text><text x="284" y="720" font-family="Inter,Arial,sans-serif" font-size="12" fill="#8B98A3">二级</text>
+  <path d="M51 746h15v12H51zM54 743h9v3H54z" fill="none" stroke="#7E8C97" stroke-width="1.7"/><text x="80" y="756" font-family="Inter,Arial,sans-serif" font-size="13" fill="#536471">引擎</text>
+  <path d="M51 781h15v12H51zM55 777h7v4H55z" fill="none" stroke="#7E8C97" stroke-width="1.7"/><text x="80" y="791" font-family="Inter,Arial,sans-serif" font-size="13" fill="#536471">.NET SDK</text>
+  <circle cx="58" cy="824" r="8" fill="none" stroke="#7E8C97" stroke-width="1.7"/><path d="M50 824h16M58 816c4 5 4 11 0 16M58 816c-4 5-4 11 0 16" fill="none" stroke="#7E8C97" stroke-width="1.4"/><text x="80" y="829" font-family="Inter,Arial,sans-serif" font-size="13" fill="#536471">下载来源</text>
+  <path d="M51 854h15v8H51zM54 850h9v4" fill="none" stroke="#7E8C97" stroke-width="1.7"/><text x="80" y="861" font-family="Inter,Arial,sans-serif" font-size="13" fill="#536471">缓存与孤儿</text>
+  <path d="M31 910h16M31 917h12M31 924h16" stroke="#738391" stroke-width="2" stroke-linecap="round"/><text x="64" y="921" font-family="Inter,Arial,sans-serif" font-size="14" fill="#42525F">设置</text>
+  <circle cx="39" cy="962" r="9" fill="none" stroke="#738391" stroke-width="2"/><path d="M39 958v6M39 967v1" stroke="#738391" stroke-width="2" stroke-linecap="round"/><text x="64" y="967" font-family="Inter,Arial,sans-serif" font-size="14" fill="#42525F">关于</text>
+
+  <!-- 条目详情 -->
+  <circle cx="408" cy="118" r="25" fill="#7148B8"/><text x="408" y="125" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="700" fill="#FFF">C#</text>
+  <text x="450" y="112" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="700" fill="#1D2733">studio-csharp</text>
+  <rect x="450" y="132" width="54" height="25" rx="4" fill="#E6F7F0"/><text x="463" y="149" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700" fill="#2E9874">当前</text>
+  <rect x="518" y="132" width="70" height="25" rx="4" fill="#EEE9F8"/><text x="529" y="149" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700" fill="#7148B8">缺省图标</text>
+  <text x="604" y="150" font-family="Inter,Arial,sans-serif" font-size="13" fill="#657582">Godot 4.5.2 · dotnet edition</text>
+  <rect x="1294" y="96" width="168" height="44" rx="5" fill="#2384D8"/><path d="M1317 118l11-7v14z" fill="#FFF"/><text x="1343" y="123" font-family="Inter,Arial,sans-serif" font-size="14" font-weight="700" fill="#FFF">启动 Godot</text>
+  <rect x="1478" y="96" width="48" height="44" rx="5" fill="#FFF" stroke="#D6DEE4"/><text x="1491" y="123" font-family="Inter,Arial,sans-serif" font-size="20" fill="#657582">···</text>
+
+  <rect x="380" y="190" width="1146" height="146" rx="7" fill="#FFFFFF" stroke="#DDE3E8"/>
+  <text x="410" y="226" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" fill="#7C8995">运行配置</text>
+  <text x="410" y="263" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">引擎</text><text x="410" y="291" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#25313C">Godot 4.5.2</text>
+  <line x1="654" y1="222" x2="654" y2="304" stroke="#E7EBEE"/><text x="688" y="263" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">SDK 策略</text><text x="688" y="291" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#25313C">Managed · 8.0.410</text>
+  <line x1="987" y1="222" x2="987" y2="304" stroke="#E7EBEE"/><text x="1021" y="263" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">显示驱动</text><text x="1021" y="291" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#25313C">自动检测</text>
+  <line x1="1256" y1="222" x2="1256" y2="304" stroke="#E7EBEE"/><text x="1290" y="263" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">状态</text><circle cx="1300" cy="287" r="6" fill="#35B88A"/><text x="1316" y="292" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#25313C">可启动</text>
+
+  <!-- 条目内模板资源 -->
+  <text x="380" y="392" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="700" fill="#1D2733">条目资源</text>
+  <text x="380" y="418" font-family="Inter,Arial,sans-serif" font-size="13" fill="#73828E">此处只管理当前条目直接使用的依赖</text>
+  <rect x="380" y="446" width="1146" height="204" rx="7" fill="#FFFFFF" stroke="#DDE3E8"/>
+  <circle cx="424" cy="491" r="22" fill="#EAF4FD"/><path d="M414 489h20v14h-20zM418 483h12v6M419 495h10" fill="none" stroke="#2384D8" stroke-width="2"/>
+  <text x="464" y="486" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" fill="#25313C">导出模板</text>
+  <text x="464" y="512" font-family="Inter,Arial,sans-serif" font-size="13" fill="#73828E">用于导出 Windows、Linux、macOS 与 Web 构建</text>
+  <rect x="410" y="544" width="1086" height="76" rx="5" fill="#F7F9FA"/>
+  <text x="434" y="573" font-family="Inter,Arial,sans-serif" font-size="14" font-weight="700" fill="#25313C">4.5.2-dotnet</text><text x="434" y="598" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">匹配当前引擎 · GodotHub · 约 1.2 GiB</text>
+  <rect x="1325" y="560" width="145" height="40" rx="5" fill="#2384D8"/><path d="M1346 570v13M1340 578l6 6 6-6M1339 590h14" fill="none" stroke="#FFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="1365" y="585" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" fill="#FFF">下载模板</text>
+
+  <text x="380" y="706" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="700" fill="#1D2733">运行环境</text>
+  <rect x="380" y="730" width="746" height="180" rx="7" fill="#FFFFFF" stroke="#DDE3E8"/>
+  <text x="410" y="770" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">派生变量</text><text x="1080" y="770" text-anchor="end" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" fill="#2384D8">查看全部</text>
+  <line x1="410" y1="790" x2="1096" y2="790" stroke="#E7EBEE"/><text x="410" y="824" font-family="ui-monospace,monospace" font-size="13" fill="#33424E">DOTNET_ROOT</text><text x="1080" y="824" text-anchor="end" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">managed SDK</text><text x="410" y="862" font-family="ui-monospace,monospace" font-size="13" fill="#33424E">PATH</text><text x="1080" y="862" text-anchor="end" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">derived</text>
+  <rect x="1150" y="730" width="376" height="180" rx="7" fill="#FFFFFF" stroke="#DDE3E8"/>
+  <text x="1180" y="770" font-family="Inter,Arial,sans-serif" font-size="13" fill="#7C8995">条目检查</text><circle cx="1192" cy="817" r="17" fill="#E6F7F0"/><path d="M1184 817l6 6 11-13" fill="none" stroke="#2DA87B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><text x="1223" y="814" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" fill="#25313C">配置完整</text><text x="1223" y="838" font-family="Inter,Arial,sans-serif" font-size="12" fill="#7C8995">引擎与 SDK 可用</text><text x="1180" y="883" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" fill="#2384D8">打开完整诊断 →</text>
+  <rect x="380" y="944" width="1146" height="38" rx="4" fill="#EAF4FD"/><text x="402" y="968" font-family="Inter,Arial,sans-serif" font-size="12" fill="#396D95">模板下载属于 studio-csharp 条目的资源操作，不会修改项目目录。</text>
+</svg>

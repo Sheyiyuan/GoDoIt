@@ -2,7 +2,7 @@
 
 > GoDoIt ｜ CLI/包名：gdit  
 > Go! Do It! 不等戈多，自己动手。  
-> 状态：v0.2 第五阶段实现完成、发布候选验证中（suggest + 导出模板）
+> 状态：v0.2 第五阶段实现完成、第六阶段 GUI 设计中（suggest + 导出模板）
 > 第五阶段验收与实现约束见 docs/architecture/README.md §9.7。
 > 平台扩展：Windows x86_64 为验证级支持；发布须通过 Windows 原生验收与 macOS Apple Silicon CI。
 
@@ -38,6 +38,8 @@ GoDoIt 的配置、状态、命令入口、引擎、SDK 和缓存统一位于用
 │   └── gdit(.exe)
 ├── instances/
 │   └── <uuid>.toml          # 条目文件；文件名是 UUID v4 存储标识，显示名存在文件内
+├── icons/
+│   └── <uuid>.png           # 第六阶段 GUI 导入的条目自定义图标
 ├── current                   # 当前条目指针：Unix 为 symlink → instances/<uuid>.toml；
 │                             #   Windows 为普通文本文件，内容为规范相对路径（避免 symlink 权限问题）
 ├── engines/                # 引擎资产（原 versions/）
@@ -197,6 +199,11 @@ Wails GUI 提供条目与版本列表、条目安装/卸载、当前条目切换
 - GUI 与 CLI 调用同一个 core。
 - GUI 不维护独立业务规则。
 - “项目分析”由用户显式选择目录触发，不维护项目列表或扫描主目录。
+- 条目列表顶部以 `+` 图标提供新建入口；图标选择缺省时普通版显示 Godot、dotnet/mono 版
+  显示 C#，也可固定选择 Godot、C#、GoDoIt 吉祥物或用户导入的自定义图标；自定义文件统一
+  存放在 gdit 根目录内。
+
+第六阶段交互与 bridge 设计见架构文档 §9.8；视觉设计稿见 [`assets/gui-design.svg`](../assets/gui-design.svg)。
 
 ### FR-10 缓存管理（P2 · 后续阶段）
 

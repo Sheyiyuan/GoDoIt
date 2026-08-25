@@ -1,7 +1,7 @@
 # GoDoIt 架构设计
 
 
-> 状态为 v0.2 第五阶段实现完成、待发布候选验证（suggest + 导出模板）
+> 状态为 v0.2 第五阶段实现完成、第六阶段 GUI 设计中（suggest + 导出模板）
 > 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段设计与验收草案见 §9.7。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
@@ -59,6 +59,8 @@ gdit 根目录默认是 `~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），并�
 │   └── gdit / gdit.exe          # gdit 自身（Windows：gdit.exe）
 ├── instances/                   # 条目层（第三阶段）：可切换的启动配置
 │   └── <uuid>.toml              # 条目文件；文件名是 UUID v4，显示名存在文件内
+├── icons/                       # 第六阶段：条目自定义图标（预设图标不复制到这里）
+│   └── <uuid>.png               # 以条目 UUID 命名的规范化 PNG
 ├── current                      # 当前条目指针（第三阶段起；平台形态见下）
 ├── engines/                     # 引擎资产层（第二阶段的 versions/ 语义）
 │   ├── 4.5.2-standard/
@@ -92,6 +94,8 @@ gdit 根目录默认是 `~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），并�
 - `instances/` 只放条目描述文件，不复制任何二进制；条目引用资产层（引擎、SDK），不内嵌资产。
   条目文件名是存储标识符（UUID v4），用户可见的显示名（可中文）存放在文件内，二者分离：
   用户通过显示名寻址（`gdit run <显示名>`），内部一律以 UUID 为准（current、引用、GC）。
+- `icons/` 只保存用户显式导入的条目图标；内置 Godot、C# 与 GoDoIt 吉祥物图标随 GUI 分发，
+  不复制到用户目录。自定义图标以条目 UUID 命名，不能引用根目录外的任意路径。
 - `engines/` 下只放完整安装；未完成内容只能出现在 `tmp/`。SDK 资产 `sdks/` 与引擎同规则。
 - `cache/` 属于 FR-10（缓存管理，P2）预留，第一阶段不创建该目录，安装下载直接进入 `tmp/`。
 - 运行时文件锁可以放在 `~/.gdit/.lock`，它不是配置或项目 lock。
@@ -417,12 +421,21 @@ version = "8.0.410"       # managed 必填，system 时忽略
 [template]                # 第五阶段可选：声明导出模板资产依赖
 id = "4.5.2-standard"     # 必须与 engine 的 version + edition 一致
 
+[appearance]              # 第六阶段可选：GUI 条目图标
+icon = "default"          # default | godot | csharp | mascot | custom
+# custom_icon = "3f2a9c1e-8b4d-4f2a-9c1e-8b4df2a9c1e8.png" # 仅 custom 时使用
+
 [env]                     # 条目级环境覆盖（FR-04 演进），全局 [environment] 之下
 # EXAMPLE_VARIABLE = "value"
 ```
 
 - `current` 是全局单一条目指针（平台形态见 §2：Unix symlink / Windows 重定向文件），
   指向 `instances/<uuid>.toml`；切换条目 = 原子替换 current。
+- `[appearance]` 是第六阶段新增的向后兼容可选字段，不提升 schema 版本。字段缺失等价于
+  `icon = "default"`：standard（普通版）解析为 Godot 图标，dotnet edition 解析为 C# 图标；
+  Godot 3 mono 输入在 core 内归一化为 dotnet edition，因此同样解析为 C#。用户也可显式固定
+  `godot`、`csharp`、`mascot` 或导入 `custom`。`custom_icon` 只接受与条目 UUID 一致的 PNG
+  文件名，并固定在 `icons/` 下解析，禁止绝对路径、`..` 和跨目录 symlink。
 - **显示名与存储标识分离**：文件名是 UUID v4（`crypto/rand` 生成，零新增依赖），条目文件内的
   `id` 字段与文件名一致；`name` 是用户可见的显示名，只承担寻址和展示，不参与任何文件系统
   操作（因此 macOS 文件系统的 Unicode 正规化差异不会影响中文显示名的匹配）。
@@ -1953,6 +1966,159 @@ error 诊断写 stderr；没有 `--install` 时即使存在分析 error 也以�
 12. 扩展现有公开 `SourceRequest` 传入 `Kind` 与已生成的 `AssetName`，内部 provider 只负责 URL、
     元数据和摘要解析；平台资产命名与模板资产命名分别留在 platform/version 责任边界。
     （建议：接受。）
+
+### 9.8 第六阶段：Wails GUI 设计（FR-09）
+
+第六阶段把已有 core 能力组合为一个桌面工作台，不新增项目管理语义，也不在 GUI 层复制
+版本解析、来源 fallback、SDK 求解、模板引用或平台判断。GUI 是 CLI 的另一种入口：Wails
+bridge 负责生命周期、参数转换和事件转发，React 只负责视图状态与用户确认。
+
+#### 产品目标与边界
+
+1. 首屏回答三个问题：当前会启动哪个条目、有哪些可用条目、是否存在需要处理的诊断。
+2. 安装、切换、卸载和孤儿清理都必须是可见的确认流程；破坏性操作不能由单击列表项触发。
+3. 项目分析只能由用户显式选择目录后触发；结果显示证据、warning/error 和拟执行动作，
+   不保存目录、不监听目录、不改变 current。
+4. 所有耗时操作均可取消；关闭窗口时，正在进行的操作进入“后台完成/取消”二选一，不能
+   静默丢弃锁、进度或错误。
+5. GUI 不修改 shell 配置、系统 PATH、系统 dotnet 或 Godot 项目目录；设置页只写
+   `~/.gdit/config.toml` 允许的字段。
+
+#### 信息架构与路由
+
+桌面窗口采用“条目侧栏 + 选中条目内容区”布局，参考 XMCL 的实例工作流：条目是唯一的
+一级工作对象，基础资源是条目的依赖，不与条目并列争夺导航层级。默认宽度 1180px、最小
+宽度 900px；窄窗口降级为可折叠侧栏，不改变内容语义。路由和数据来源如下：
+
+| 路由 | 内容 | core 读取/动作 |
+|---|---|---|
+| `/instances` | 条目浏览、设为 current、启动、卸载；`+` 打开创建向导 | `Instances`、`SetDefault`、`RemoveInstance`、`ResolveLaunch` |
+| `/instances/:name` | 选中条目详情：运行时、环境、导出模板和操作记录 | `Default`、`EffectiveEnv`、`Templates`、`AttachTemplate`、`DetachTemplate` |
+| `/instances/new` | 创建条目向导：版本、edition、SDK、模板、current 确认 | `Available`、`AvailableSDKs`、`InstallEntry` |
+| `/resources/engines`、`/resources/sdks`、`/resources/sources`、`/resources/cache` | 二级资源管理；查看引用、来源和孤儿清理 | `List`、`SDKs`、`Sources`、`Orphans`、`AutoRemove` |
+| `/suggest` | 显式选目录、分析证据、安装建议 | `Suggest`、`InstallSuggestion` |
+| `/doctor` | 本地诊断、可选网络探测、按严重级别筛选 | `Doctor(false/true)` |
+| `/settings`、`/about` | 设置和关于 | `SetSourceDisabled`、`SetDefaultSource`、`SetEnvVar`；只读构建信息 |
+
+侧栏条目列表的第一项固定为“新建条目”，头像位显示 `+`，点击进入创建向导；其后才是已有
+条目。每个条目使用固定 44px 图标位，支持缺省、Godot、C#、GoDoIt 吉祥物头像和自定义图标，
+当前条目用背景与文字标记高亮，不用状态点替代图标。
+`项目建议`、`诊断`、`设置`为少量辅助入口；`资源管理`是可展开的二级菜单，包含引擎、SDK、
+来源和缓存。当前条目变更后立即刷新侧栏和详情，不做页面级缓存。
+
+#### 核心页面设计
+
+**条目浏览**默认选中 current 条目。左侧条目列表负责切换上下文，右侧详情展示名称、引擎
+版本、edition、SDK 策略、环境摘要和 `Launch` 主按钮；`Set current`、卸载、复制配置等
+动作收进详情头部的显式按钮或溢出菜单。没有 current 时显示空状态和 `+` 创建入口。
+
+**条目图标**在创建向导和条目详情中都可选择。`缺省` 是初始选择：普通版显示 Godot 图标，
+dotnet/mono 版显示 C# 图标；Godot、C# 和 GoDoIt 吉祥物也可作为固定预设选择。自定义图标
+通过系统文件选择器导入，接受 PNG/JPEG，解码后居中
+裁切并规范化为 256x256 PNG，源文件不被修改。损坏、超限或透明度异常的图片拒绝导入；
+自定义文件丢失时回退到 edition 默认图标并由 doctor 报 warning。
+
+**导出资源**属于条目详情的一部分，不单独成为一级页面。详情中显示匹配的模板版本、下载
+状态、大小、引用关系和 `下载模板`/`重新下载`/`解除绑定`操作；模板安装仍由 core 的模板
+资产 API 完成，前端不得自行拼接模板 ID 或路径。
+
+**安装向导**为四步状态机：`Engine`（系列、精确版本、来源）→ `Runtime`（standard 或
+dotnet、managed/system、SDK patch）→ `Template`（匹配模板、大小、来源）→ `Review`。
+每一步只展示 core 返回的候选项；网络枚举期间显示可取消的进度状态。Review 页明确列出
+将安装的引擎/SDK/模板、预计占用、是否设为 current；只有点击 `Install` 才调用
+`InstallEntry` 或 `InstallSuggestion`。
+
+**Suggest** 先选择目录，再显示 `project.godot`、`global.json`、`.csproj` 的证据行。
+error 以阻断色显示并禁用安装，warning 不阻断但必须在 Review 中再次出现；路径只在本次
+React 状态中存在，Wails bridge 不写入持久配置。
+
+**资源管理**默认折叠在侧栏二级菜单中，分别查看 `Engines / SDKs / Sources / Cache`。
+模板不在这里作为日常入口展示，只在资源诊断或条目详情中作为条目依赖出现。资源页表格显示
+版本、来源、大小、引用条目和状态；`Auto remove` 先打开包含复查说明的确认对话框，成功后
+用 core 返回的实际删除清单刷新，不根据前端旧列表自行推断。
+
+**Doctor** 采用检查项列表而不是一张大卡片：每项包含状态、平台相关细节、修复建议和“打开
+对应设置/命令”快捷入口。默认调用 `Doctor(false)`；“检查来源可达性”是显式开关，开启后
+显示网络探测进度并把失败标为 warning，遵循 core 的错误级别。
+
+#### Bridge 与事件契约
+
+`gui/bridge` 只暴露下列薄方法，方法名使用面向界面的动词，参数/返回值直接映射 core 公共
+类型并保留 `json` 字段：
+
+```text
+Bootstrap() -> AppSnapshot
+ListInstances() / GetDefault() / ListAssets() / GetDoctor(network)
+ListAvailableVersions(source) / ListAvailableSDKs()
+InstallEntry(request) / InstallSuggestion(request)
+SetDefault(name) / RemoveInstance(name) / AutoRemove()
+SetInstanceIcon(name, request)
+Suggest(projectDir) / SetEnvVar(scope, key, value)
+ListSources() / SetSourceDisabled(name, disabled) / SetDefaultSource(name)
+Cancel(operationID)
+```
+
+每个耗时调用返回 `operationID`，并通过 Wails 事件 `gdit:progress` 推送 `ProgressEvent`，
+事件增加 bridge 侧的 `operation_id` 和 `timestamp` 包装字段但不修改 core 事件内容。
+终态事件为 `complete | failed | canceled`；React 以 `operationID` 合并事件，禁止按版本
+字符串猜测进度。窗口重载后调用 `Bootstrap`，不从本地缓存恢复半成品状态。
+
+#### 状态、错误与安全
+
+- React store 分为 `snapshot`（可重建读取状态）、`operation`（进行中任务）和 `modal`
+  （确认/错误）；业务字段不复制到第二份模型。
+- `context.Context` 取消映射到 `Cancel(operationID)`；Wails 窗口关闭先提示仍有任务，再
+  逐项取消或等待完成。
+- bridge 不接收 stdout/stderr、不记录 token、完整认证 URL 或环境变量值；敏感环境值在
+  设置页默认掩码，调用 `EffectiveEnv` 时仅显示来源和键名，除非用户主动展开单项。
+- 项目目录选择器把路径作为一次性输入，显示“不会写入项目或保存路径”的固定提示；GUI
+  不提供“自动扫描主目录”或“按目录自动切换”入口。
+- Wails bridge 只负责打开图片选择器；图片解码、大小限制、裁切、原子写入和条目字段更新由
+  core 的 `SetInstanceIcon` 完成。删除条目时一并清理同 UUID 自定义图标；孤立图标由 doctor
+  报 warning，不纳入引擎/SDK/模板的资产 GC。
+- 安装、卸载、current 切换和模板 attach/detach 的确认文案必须来自操作结果，不以前端
+  预估替代 core 校验；任何错误都保留旧视图并显示可重试动作。
+
+#### 视觉与可用性基线
+
+视觉基线见 [`assets/gui-design.svg`](../../assets/gui-design.svg)：浅色工作台背景、石墨文字、
+青蓝主色和橙色警示色，避免大面积渐变和装饰性卡片。使用系统无衬线字体，正文 14px、标题
+20px，表格行高不低于 44px；所有图标按钮带可访问名称，颜色不作为唯一状态信号。键盘焦点
+可见，确认对话框支持 `Esc` 取消与 `Enter` 执行，窄窗口下表格转为纵向条目卡但不隐藏
+current、edition、SDK 和引用状态。
+
+#### 实施顺序与验收闸门
+
+1. 先在 core 增加向后兼容的条目图标字段、`SetInstanceIcon` 和图标文件生命周期，再创建
+   `gui/` Wails v2 module，建立最小 bridge、React 路由、主题 token 和 `Bootstrap`；用固定
+   fixture 验证序列化与旧条目默认图标。
+2. 完成条目侧栏、条目详情与 current/launch 流程，再接入 `+` 创建向导和结构化进度事件。
+3. 接入条目内模板资源、二级资源管理、Suggest、Doctor、Settings；所有写操作补充成功、
+   取消、错误和重载恢复测试。
+4. Linux amd64 完成主验收后，再在 macOS Apple Silicon 与 Windows x86_64 验证窗口、文件
+   选择器、shim 文案和路径显示；平台判断仍只在 platform/core 内。
+5. 发布构建必须同时产出 CLI 与 GUI；GUI 不得改变 CLI 的退出码、网络策略或数据布局。
+
+验收至少覆盖：首屏无 current、悬空 current、坏条目、缺 SDK/模板、安装中断、摘要失败、
+取消后重载、doctor 网络开关、suggest 目录内容零变化、当前条目拒绝删除、模板引用保护、
+孤儿复查不误删，以及三平台的键盘导航和高 DPI 布局。图标额外覆盖：旧条目按 edition
+回退、缺省映射、五种图标策略渲染、PNG/JPEG 导入、超限/损坏图片拒绝、路径穿越拒绝、原子替换、条目
+删除清理，以及自定义文件缺失时 doctor warning。
+
+#### 待用户 review 的实现决策
+
+1. GUI 首屏采用条目浏览器并默认选中 current；条目是一级主题，不再设置独立总览页。
+   （用户已明确。）
+2. 安装向导允许选择来源，但不允许在 GUI 中编辑自定义来源 URL；配置编辑继续使用
+   `config.toml`，GUI 只管理来源顺序和启禁用。（建议：接受。）
+3. GUI 不提供后台常驻、托盘自动切换或项目目录 watcher；后续若有需求另立阶段。（建议：接受。）
+4. 第一版只做浅色主题和系统字体，先保证 Linux 主平台可读性；深色主题作为独立视觉迭代，
+   不把主题偏好写入 core 配置。（建议：接受。）
+5. 导出模板作为条目的资源依赖管理，不在一级或二级资源菜单中提供独立日常入口。
+   （用户已明确。）
+6. 条目列表第一项固定为 `+` 新建；图标选择增加 `缺省`，普通版缺省显示 Godot，
+   dotnet/mono 版缺省显示 C#，并可固定选择 Godot、C#、GoDoIt 吉祥物或自定义图标。
+   （用户已明确。）
 
 ## 10. Review 结论
 
