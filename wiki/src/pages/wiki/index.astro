@@ -16,9 +16,10 @@ const sorted = (id: string) => all.filter((entry) => entry.data.section === id).
 
 <Wiki title="Wiki · GoDoIt" description="GoDoIt 的教程、操作指南、参考和设计解释。">
 	<header class="doc-header wiki-header">
-		<p class="doc-kicker">Documentation / v0.2</p>
+		<p class="doc-kicker">Documentation / v0.2 · Phase 4 implemented</p>
 		<h1>GoDoIt Wiki</h1>
-		<p class="doc-description">第一次来，从教程开始。手上已经有具体问题，就按下面的动作直接进入对应页面。</p>
+		<p class="doc-description">第四阶段能力已经落地，第五阶段设计正在 review。第一次来从教程开始；需要核对边界时先看开发状态。</p>
+		<p class="platform-note"><img src="/windows.svg" alt="" />Windows x86_64 已纳入验证级支持，与 macOS arm64 共用发布门禁。</p>
 	</header>
 
 	<section class="start-path" aria-labelledby="start-title">
@@ -55,6 +56,8 @@ const sorted = (id: string) => all.filter((entry) => entry.data.section === id).
 	</div>
 	<style>
 		.wiki-header { max-width: 700px; }
+		.platform-note { display: inline-flex; align-items: center; gap: 0.45rem; margin: 1rem 0 0; color: var(--ink-faint); font-size: 0.82rem; }
+		.platform-note img { width: 16px; height: 16px; flex: 0 0 auto; }
 		.start-path {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="windows-title">
+  <title id="windows-title">Windows</title>
+  <path fill="#9bacc2" d="M2 3.5 10.75 2.3v8.45H2V3.5Zm10-1.38L22 .75v10H12V2.12ZM2 12h8.75v8.45L2 19.25V12Zm10 0h10v10.25l-10-1.38V12Z"/>
+</svg>

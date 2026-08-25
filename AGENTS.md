@@ -6,7 +6,7 @@
 ## 项目定位
 
 **GoDoIt（中文名：够独特，CLI/包名：gdit）** 是面向 Linux（主）和 macOS（验证）的
-**Godot 引擎启动器与版本管理器**：底层是包管理器（引擎/.NET SDK 资产），上层是启动器
+**Godot 引擎启动器与版本管理器**：底层是包管理器（引擎/.NET SDK/导出模板资产），上层是启动器
 条目（instances，引用资产 + SDK 策略 + 环境配置）。
 
 口号：**Go! Do It! 不等戈多，自己动手。**
@@ -14,7 +14,7 @@
 - 仓库/App 名：`GoDoIt`
 - CLI/包名：`gdit`
 - 中文名：`够独特`
-- 不支持 Windows，不添加 Windows 代码
+- Linux 为主平台，macOS Apple Silicon 与 Windows x64 为验证平台
 
 GoDoIt 管理引擎，不管理项目。项目文件只供 `gdit suggest` 显式只读分析：
 
@@ -31,7 +31,7 @@ GoDoIt 管理引擎，不管理项目。项目文件只供 `gdit suggest` 显式
 | GUI | Wails v2 + React |
 | 配置 | TOML，BurntSushi/toml |
 | 工作区 | go work，core/CLI/GUI 分 module |
-| 平台 | Linux 主，macOS Apple Silicon 验证 |
+| 平台 | Linux 主，macOS Apple Silicon 与 Windows x64 验证 |
 
 手写配置不用 YAML。JSON 只用于 Wails 或 CLI 机器输出等接口场景。
 
@@ -112,5 +112,6 @@ GoDoIt/
 - 使用 git flow 风格分支和约定式提交。
 - 不改动与当前任务无关的文件。
 
-当前实现状态为 `v0.2 第三阶段实施中`（instances 条目层 + 环境注入 + .NET SDK + 资产 GC）。
-前两阶段已交付：install/list/来源管理（第一阶段）、default/remove/setup/run（第二阶段）。
+当前实现状态为 `v0.2 第五阶段实施中`（suggest + 导出模板）。
+前四阶段已交付：资产来源与安装、启动与默认版本、instances/SDK/环境/GC，以及 doctor 与
+Linux/macOS/Windows 平台适配层。

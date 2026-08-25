@@ -1,14 +1,18 @@
 SHELL := /bin/sh
 
 GO ?= go
+INKSCAPE ?= inkscape
 BIN_DIR ?= bin
 BINARY := $(BIN_DIR)/gdit
 CLI_PACKAGE := ./cli/cmd/gdit
 GO_PACKAGES := ./core/... ./cli/...
+HERO_SVG := assets/readme/hero.svg
+HERO_PNG := assets/readme/hero.png
+HERO_PNG_WIDTH := 2400
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build run test test-race fmt fmt-check vet check clean help
+.PHONY: all build run test test-race fmt fmt-check vet check png clean help
 
 all: check build
 
@@ -54,6 +58,9 @@ vet:
 
 check: fmt-check test vet
 
+png:
+	$(INKSCAPE) $(HERO_SVG) --export-filename=$(HERO_PNG) --export-width=$(HERO_PNG_WIDTH)
+
 clean:
 	rm -f $(BINARY)
 	@rmdir $(BIN_DIR) 2>/dev/null || true
@@ -68,5 +75,6 @@ help:
 		'fmt-check  检查 Go 文件格式但不修改文件' \
 		'vet        静态检查所有 Go 包' \
 		'check      运行格式检查、测试和静态检查' \
+		'png        使用 Inkscape 将 README hero 渲染为 2400px 宽 PNG' \
 		'all        检查后构建 CLI' \
 		'clean      删除构建产物'

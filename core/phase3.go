@@ -103,6 +103,21 @@ func (m *Manager) InstallEntry(ctx context.Context, request InstallEntryRequest)
 			result.StateRebuildRequired = result.StateRebuildRequired || installedSDK.StateRebuildRequired
 		}
 	}
+	if request.Template {
+		templateID := item.Engine.Version + "-" + item.Engine.Edition
+		templates, scanErr := storeRoot.ScanTemplates()
+		if scanErr != nil {
+			return result, localIOError("scan templates", scanErr)
+		}
+		if findTemplateRecord(templates, templateID) == nil {
+			installedTemplate, installErr := m.installTemplateLocked(ctx, InstallTemplateRequest{Version: item.Engine.Version, Edition: item.Engine.Edition})
+			if installErr != nil {
+				return result, installErr
+			}
+			result.Installed = append(result.Installed, AssetChange{Kind: "template", ID: installedTemplate.ID})
+		}
+		item.Template = &instance.Template{ID: templateID}
+	}
 	if err := instance.Write(m.root, item); err != nil {
 		return result, localIOError("write instance", err)
 	}
@@ -149,7 +164,10 @@ func (m *Manager) normalizeEntryRequest(ctx context.Context, request InstallEntr
 			if strategy == "" {
 				strategy = "managed"
 			}
-			item.Dotnet = &instance.Dotnet{Strategy: strategy, Version: request.SDKVersion}
+			item.Dotnet = &instance.Dotnet{Strategy: strategy}
+			if strategy == "managed" {
+				item.Dotnet.Version = request.SDKVersion
+			}
 			if strategy == "managed" && item.Dotnet.Version == "" {
 				major := dotnet.RecommendedMajor(request.Version)
 				if major == "" {
@@ -189,8 +207,18 @@ func (m *Manager) Instances(ctx context.Context) ([]InstanceInfo, error) {
 		return nil, localIOError("read current instance", err)
 	}
 	result := make([]InstanceInfo, 0, len(items))
+	templates, err := store.New(m.root).ScanTemplates()
+	if err != nil {
+		return nil, localIOError("scan templates", err)
+	}
+	installedTemplates := make(map[string]bool, len(templates))
+	for _, record := range templates {
+		installedTemplates[record.Manifest.ID] = true
+	}
 	for _, item := range items {
-		result = append(result, instanceToPublic(item, item.ID == current))
+		info := instanceToPublic(item, item.ID == current)
+		info.TemplateMissing = info.Template != "" && !installedTemplates[info.Template]
+		result = append(result, info)
 	}
 	return result, nil
 }
@@ -242,7 +270,7 @@ func (m *Manager) RemoveInstance(ctx context.Context, name string) (RemoveInstan
 	return RemoveInstanceResult{Instance: instanceToPublic(*target, false), Orphans: orphans}, nil
 }
 
-// Orphans 返回当前无条目引用的引擎和托管 SDK 资产。
+// Orphans 返回当前无条目引用的引擎、托管 SDK 和导出模板资产。
 func (m *Manager) Orphans(ctx context.Context) ([]OrphanAsset, error) {
 	items, err := instance.Scan(m.root)
 	if err != nil {
@@ -261,6 +289,10 @@ func (m *Manager) orphansFor(items []instance.File) ([]OrphanAsset, error) {
 	sdks, err := storeRoot.ScanSDKs()
 	if err != nil {
 		return nil, localIOError("scan SDK assets", err)
+	}
+	templates, err := storeRoot.ScanTemplates()
+	if err != nil {
+		return nil, localIOError("scan template assets", err)
 	}
 	result := make([]OrphanAsset, 0)
 	for _, record := range engines {
@@ -282,6 +314,16 @@ func (m *Manager) orphansFor(items []instance.File) ([]OrphanAsset, error) {
 			return nil, localIOError("measure SDK asset", sizeErr)
 		}
 		result = append(result, OrphanAsset{Kind: "sdk", ID: record.Manifest.Version, Size: size, Path: record.Dir})
+	}
+	for _, record := range templates {
+		if len(refs.Templates[record.Manifest.ID]) != 0 {
+			continue
+		}
+		size, sizeErr := store.DirectorySize(record.Dir)
+		if sizeErr != nil {
+			return nil, localIOError("measure template asset", sizeErr)
+		}
+		result = append(result, OrphanAsset{Kind: "template", ID: record.Manifest.ID, Size: size, Path: record.Dir})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Kind == result[j].Kind {
@@ -319,8 +361,10 @@ func (m *Manager) AutoRemove(ctx context.Context) (AutoRemoveResult, error) {
 		var removeErr error
 		if orphan.Kind == "engine" {
 			removeErr = storeRoot.RemoveEngine(orphan.ID)
-		} else {
+		} else if orphan.Kind == "sdk" {
 			removeErr = storeRoot.RemoveSDK(orphan.ID)
+		} else {
+			removeErr = storeRoot.RemoveTemplate(orphan.ID)
 		}
 		if removeErr != nil {
 			return result, localIOError("remove orphan asset", removeErr)
@@ -723,6 +767,9 @@ func instanceToPublic(item instance.File, current bool) InstanceInfo {
 		if item.Dotnet.Strategy == "managed" {
 			result.SDK = item.Dotnet.Version
 		}
+	}
+	if item.Template != nil {
+		result.Template = item.Template.ID
 	}
 	return result
 }

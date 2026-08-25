@@ -3,7 +3,7 @@ title: 命令参考
 description: gdit 命令、参数和行为约定的速查表。
 section: reference
 order: 1
-updated: 2026-08-21
+updated: 2026-08-25
 ---
 
 命令简写为 `install`→`i`、`list`→`l`、`source`→`s`、`available`→`a`、`default`→`d`、`run`→`r`、`remove`→`rm`、`setup`→`st`、`env`→`e`。
@@ -69,6 +69,17 @@ updated: 2026-08-21
 | 本地诊断 | `gdit doctor` | 检查平台、根目录、shim、current、条目、资产、环境、来源和 state；默认零网络、零落盘 |
 | 网络探测 | `gdit doctor --network` | 额外探测启用来源的可达性 |
 | 展开细节 | `gdit doctor --verbose` | 显示环境来源、来源状态和修复建议；敏感值仍掩码 |
+
+## 项目建议与导出模板
+
+| 操作 | 命令 | 边界 |
+|---|---|---|
+| 只读分析项目 | `gdit suggest [<项目目录>]` | 默认零网络、零落盘，不改变 current |
+| 按建议安装 | `gdit suggest <目录> --install --name <条目名>` | 重新分析后复用条目安装流程 |
+| 管理导出模板 | `gdit template list/install/remove` | 精确版本 + edition，摘要校验后原子发布 |
+| 绑定模板条目 | `gdit template attach/detach <条目名>` | 模板作为可选条目依赖，参与引用保护和 GC |
+
+详细阶段边界见 [开发状态与阶段范围](/wiki/reference/development-status/)。
 
 ## 约定
 

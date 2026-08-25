@@ -90,7 +90,7 @@ func (s *Store) Init() error {
 	if err := os.MkdirAll(s.Root, 0o700); err != nil {
 		return fmt.Errorf("create store root: %w", err)
 	}
-	for _, path := range []string{s.EnginesDir(), s.SDKsDir(), s.InstancesDir(), s.TmpDir()} {
+	for _, path := range []string{s.EnginesDir(), s.SDKsDir(), s.TemplatesDir(), s.InstancesDir(), s.TmpDir()} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create store directory: %w", err)
 		}
@@ -106,6 +106,12 @@ func (s *Store) EngineDir(id string) string { return filepath.Join(s.EnginesDir(
 
 // SDKsDir 返回已发布托管 SDK 资产目录。
 func (s *Store) SDKsDir() string { return filepath.Join(s.Root, "sdks") }
+
+// TemplatesDir 返回已发布导出模板资产目录。
+func (s *Store) TemplatesDir() string { return filepath.Join(s.Root, "templates") }
+
+// TemplateDir 返回指定导出模板资产目录。
+func (s *Store) TemplateDir(id string) string { return filepath.Join(s.TemplatesDir(), id) }
 
 // InstancesDir 返回启动器条目目录。
 func (s *Store) InstancesDir() string { return filepath.Join(s.Root, "instances") }

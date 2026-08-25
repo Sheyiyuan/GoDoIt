@@ -296,6 +296,7 @@ func TestBuildReferencesMapsManagedSDKOnly(t *testing.T) {
 	managed := validItem("csharp")
 	managed.Engine.Edition = "dotnet"
 	managed.Dotnet = &Dotnet{Strategy: "managed", Version: "8.0.410"}
+	managed.Template = &Template{ID: "4.5.2-dotnet"}
 	system := validItem("sys")
 	system.Engine.Edition = "dotnet"
 	system.Dotnet = &Dotnet{Strategy: "system"}
@@ -311,6 +312,21 @@ func TestBuildReferencesMapsManagedSDKOnly(t *testing.T) {
 	}
 	if _, exists := refs.SDKs[""]; exists {
 		t.Fatalf("system strategy must not reference an SDK: %+v", refs.SDKs)
+	}
+	if len(refs.Templates["4.5.2-dotnet"]) != 1 || refs.Templates["4.5.2-dotnet"][0] != "csharp" {
+		t.Fatalf("template refs missing: %+v", refs.Templates)
+	}
+}
+
+func TestValidateTemplateMustMatchEngine(t *testing.T) {
+	item := validItem("work")
+	item.Template = &Template{ID: "4.5.1-standard"}
+	if err := Validate(&item, item.ID+".toml"); err == nil {
+		t.Fatal("mismatched template reference should fail")
+	}
+	item.Template.ID = "4.5.2-standard"
+	if err := Validate(&item, item.ID+".toml"); err != nil {
+		t.Fatalf("matching template reference failed: %v", err)
 	}
 }
 

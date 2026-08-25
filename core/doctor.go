@@ -274,6 +274,15 @@ func (m *Manager) checkInstances(ctx context.Context, check doctorCheck) {
 	for _, record := range sdks {
 		sdkVersions[record.Manifest.Version] = true
 	}
+	templates, err := storeRoot.ScanTemplates()
+	if err != nil {
+		check("instances", StatusError, fmt.Sprintf("扫描导出模板失败：%v", err), "")
+		return
+	}
+	templateIDs := make(map[string]bool, len(templates))
+	for _, record := range templates {
+		templateIDs[record.Manifest.ID] = true
+	}
 	items, err := instance.ScanDefinitions(m.root)
 	if err != nil {
 		check("instances", StatusError, fmt.Sprintf("条目集合存在问题：%v", err), "修复或删除坏条目")
@@ -284,6 +293,7 @@ func (m *Manager) checkInstances(ctx context.Context, check doctorCheck) {
 		return
 	}
 	hasError := false
+	hasWarning := false
 	for _, item := range items {
 		engineID := item.Engine.Version + "-" + item.Engine.Edition
 		if !engineIDs[engineID] {
@@ -296,8 +306,12 @@ func (m *Manager) checkInstances(ctx context.Context, check doctorCheck) {
 				hasError = true
 			}
 		}
+		if item.Template != nil && !templateIDs[item.Template.ID] {
+			check("instances", StatusWarn, fmt.Sprintf("条目 %s 绑定的导出模板 %s 未安装", item.Name, item.Template.ID), "运行 gdit template attach "+item.Name)
+			hasWarning = true
+		}
 	}
-	if !hasError {
+	if !hasError && !hasWarning {
 		check("instances", StatusOK, fmt.Sprintf("全部 %d 个条目引用完整", len(items)), "")
 	}
 }
@@ -386,22 +400,37 @@ func systemSDKNames(sdks []SDKInfo) string {
 	return strings.Join(names, "、")
 }
 
-// checkTemplates 检查 templates/ 目录状态（第五阶段才使用）。
+// checkTemplates 检查 templates/ 下每个导出模板资产的完整性。
 func (m *Manager) checkTemplates(ctx context.Context, check doctorCheck) {
 	entries, err := os.ReadDir(filepath.Join(m.root, "templates"))
 	if errors.Is(err, os.ErrNotExist) {
-		check("templates", StatusOK, "templates/ 未创建（符合预期）", "")
+		check("templates", StatusOK, "无导出模板资产", "")
 		return
 	}
 	if err != nil {
-		check("templates", StatusWarn, fmt.Sprintf("读取 templates/ 失败：%v", err), "")
+		check("templates", StatusError, fmt.Sprintf("读取 templates/ 失败：%v", err), "")
 		return
 	}
-	if len(entries) > 0 {
-		check("templates", StatusWarn, "templates/ 存在内容但导出模板支持尚未落地，内容不会被使用", "")
+	count := 0
+	hasError := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		count++
+		dir := filepath.Join(m.root, "templates", entry.Name())
+		if inspectErr := store.InspectTemplateDir(dir); inspectErr != nil {
+			check("templates", StatusError, fmt.Sprintf("导出模板 %s 无效：%v", entry.Name(), inspectErr), "手动删除目录或重新安装")
+			hasError = true
+		}
+	}
+	if count == 0 {
+		check("templates", StatusOK, "无导出模板资产", "")
 		return
 	}
-	check("templates", StatusOK, "templates/ 为空", "")
+	if !hasError {
+		check("templates", StatusOK, fmt.Sprintf("全部 %d 个导出模板资产完整", count), "")
+	}
 }
 
 // checkEnvironment 计算当前条目的注入环境并预览（含敏感键掩码）。

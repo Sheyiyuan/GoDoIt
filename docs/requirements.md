@@ -2,8 +2,8 @@
 
 > GoDoIt ｜ CLI/包名：gdit  
 > Go! Do It! 不等戈多，自己动手。  
-> 状态：v0.2 第四阶段实现完成、发布候选验证中（doctor + Linux/macOS/Windows 平台适配层）
-> 第四阶段验收与实现约束见 docs/architecture/README.md §9.6 与 §4.9。
+> 状态：v0.2 第五阶段实现完成、发布候选验证中（suggest + 导出模板）
+> 第五阶段验收与实现约束见 docs/architecture/README.md §9.7。
 > 平台扩展：Windows x86_64 为验证级支持；发布须通过 Windows 原生验收与 macOS Apple Silicon CI。
 
 ## 1. 项目定位

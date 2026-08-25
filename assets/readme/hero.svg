@@ -1,79 +1,276 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="1200" height="420" viewBox="0 0 1200 420"
-     role="img" aria-labelledby="hero-title hero-desc">
-  <title id="hero-title">GoDoIt Godot launcher and version manager</title>
-  <desc id="hero-desc">The GoDoIt logo, Linux and macOS icons, mascot, and a terminal workflow that launches the current Godot entry.</desc>
-
-  <defs>
-    <clipPath id="hero-clip">
-      <rect width="1200" height="420" rx="24"/>
-    </clipPath>
-    <clipPath id="mascot-clip">
-      <rect x="548" y="28" width="244" height="392" rx="20"/>
-    </clipPath>
-  </defs>
-
-  <g clip-path="url(#hero-clip)">
-    <rect width="1200" height="420" fill="#101827"/>
-    <rect x="0" y="0" width="1200" height="7" fill="#448ff1"/>
-
-    <g id="identity">
-      <image x="16" y="-56" width="560" height="315" href="../logo.svg" xlink:href="../logo.svg"
-             preserveAspectRatio="xMidYMid meet"/>
-      <text x="58" y="268" fill="#f7fafc"
-            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-            font-size="23" font-weight="700">你的 Godot 启动可以更加优雅</text>
-
-      <g id="platforms" transform="translate(235 280)">
-        <image x="0" y="0" width="30" height="30" href="linux.svg" xlink:href="linux.svg"
-               aria-label="Linux" role="img"/>
-        <image x="54" y="0" width="30" height="30" href="apple.svg" xlink:href="apple.svg"
-               aria-label="Apple" role="img"/>
-      </g>
-
-      <g transform="translate(58 334)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">
-        <rect width="112" height="38" rx="6" fill="#182a3d" stroke="#2c526a"/>
-        <text x="56" y="25" text-anchor="middle" fill="#7fdcf4">install</text>
-        <path d="M120 19H147" stroke="#536b86" stroke-width="2"/>
-        <path d="m141 13 7 6-7 6" fill="none" stroke="#536b86" stroke-width="2"/>
-        <rect x="156" width="126" height="38" rx="6" fill="#241f43" stroke="#594898"/>
-        <text x="219" y="25" text-anchor="middle" fill="#b9a5ff">instance</text>
-        <path d="M290 19H317" stroke="#536b86" stroke-width="2"/>
-        <path d="m311 13 7 6-7 6" fill="none" stroke="#536b86" stroke-width="2"/>
-        <rect x="326" width="112" height="38" rx="6" fill="#332d21" stroke="#735f31"/>
-        <text x="382" y="25" text-anchor="middle" fill="#ffd166">godot</text>
-      </g>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+    width="1200"
+    height="420"
+    viewBox="0 0 1200 420"
+    role="img"
+    aria-labelledby="hero-title hero-desc"
+    version="1.1"
+    id="svg26"
+    sodipodi:docname="hero.svg"
+    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns="http://www.w3.org/2000/svg"
+    xmlns:svg="http://www.w3.org/2000/svg"
+>
+    <sodipodi:namedview
+        id="namedview26"
+        pagecolor="#ffffff"
+        bordercolor="#000000"
+        borderopacity="0.25"
+        inkscape:showpageshadow="2"
+        inkscape:pageopacity="0.0"
+        inkscape:pagecheckerboard="0"
+        inkscape:deskcolor="#d1d1d1"
+        inkscape:zoom="1.304976"
+        inkscape:cx="437.17279"
+        inkscape:cy="310.35053"
+        inkscape:window-width="1710"
+        inkscape:window-height="963"
+        inkscape:window-x="0"
+        inkscape:window-y="39"
+        inkscape:window-maximized="1"
+        inkscape:current-layer="platforms"
+    />
+    <title id="hero-title">GoDoIt Godot launcher and version manager</title>
+    <desc id="hero-desc">
+        The GoDoIt logo, Linux, macOS and Windows icons, mascot, and a terminal
+        workflow that launches the current Godot entry.
+    </desc>
+    <defs id="defs2">
+        <clipPath id="hero-clip">
+            <rect width="1200" height="420" rx="24" id="rect1" />
+        </clipPath>
+        <clipPath id="mascot-clip">
+            <rect x="548" y="28" width="244" height="392" rx="20" id="rect2" />
+        </clipPath>
+    </defs>
+    <g clip-path="url(#hero-clip)" id="g26">
+        <rect width="1200" height="420" fill="#101827" id="rect3" />
+        <rect x="0" y="0" width="1200" height="7" fill="#448ff1" id="rect4" />
+        <g id="identity">
+            <image
+                x="16"
+                y="-56"
+                width="560"
+                height="315"
+                href="../logo.svg"
+                xlink:href="../logo.svg"
+                preserveAspectRatio="xMidYMid meet"
+                id="image4"
+            />
+            <text
+                x="58"
+                y="268"
+                fill="#f7fafc"
+                font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+                font-size="23"
+                font-weight="700"
+                id="text4"
+            >
+                你的 Godot 启动可以更加优雅
+            </text>
+            <g id="platforms" transform="translate(208 280)">
+                <image
+                    x="0"
+                    y="2"
+                    width="26.934809"
+                    height="26.168512"
+                    href="linux.svg"
+                    xlink:href="linux.svg"
+                    aria-label="Linux"
+                    role="img"
+                    id="image5"
+                />
+                <image
+                    x="54"
+                    y="0"
+                    width="25"
+                    height="25"
+                    href="apple.svg"
+                    xlink:href="apple.svg"
+                    aria-label="Apple"
+                    role="img"
+                    id="image6"
+                />
+                <image
+                    x="108"
+                    y="1.0651906"
+                    width="26.168512"
+                    height="26.934809"
+                    href="windows.svg"
+                    xlink:href="windows.svg"
+                    aria-label="Windows"
+                    role="img"
+                    id="image7"
+                />
+            </g>
+            <g
+                transform="translate(58 334)"
+                font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+                font-size="16"
+                id="g10"
+            >
+                <rect
+                    width="112"
+                    height="38"
+                    rx="6"
+                    fill="#182a3d"
+                    stroke="#2c526a"
+                    id="rect7"
+                />
+                <text
+                    x="56"
+                    y="25"
+                    text-anchor="middle"
+                    fill="#7fdcf4"
+                    id="text7"
+                >
+                    installing
+                </text>
+                <path
+                    d="M120 19H147"
+                    stroke="#536b86"
+                    stroke-width="2"
+                    id="path7"
+                />
+                <path
+                    d="m141 13 7 6-7 6"
+                    fill="none"
+                    stroke="#536b86"
+                    stroke-width="2"
+                    id="path8"
+                />
+                <rect
+                    x="156"
+                    width="126"
+                    height="38"
+                    rx="6"
+                    fill="#241f43"
+                    stroke="#594898"
+                    id="rect8"
+                />
+                <text
+                    x="219"
+                    y="25"
+                    text-anchor="middle"
+                    fill="#b9a5ff"
+                    id="text8"
+                >
+                    managing
+                </text>
+                <path
+                    d="M290 19H317"
+                    stroke="#536b86"
+                    stroke-width="2"
+                    id="path9"
+                />
+                <path
+                    d="m311 13 7 6-7 6"
+                    fill="none"
+                    stroke="#536b86"
+                    stroke-width="2"
+                    id="path10"
+                />
+                <rect
+                    x="326"
+                    width="112"
+                    height="38"
+                    rx="6"
+                    fill="#332d21"
+                    stroke="#735f31"
+                    id="rect10"
+                />
+                <text
+                    x="382"
+                    y="25"
+                    text-anchor="middle"
+                    fill="#ffd166"
+                    id="text10"
+                >
+                    starting
+                </text>
+            </g>
+        </g>
+        <g id="mascot" clip-path="url(#mascot-clip)">
+            <rect
+                x="548"
+                y="28"
+                width="244"
+                height="392"
+                rx="20"
+                fill="#172338"
+                stroke="#344964"
+                id="rect11"
+            />
+            <circle cx="671" cy="209" r="112" fill="#243451" id="circle11" />
+            <image
+                x="553"
+                y="7"
+                width="238"
+                height="543"
+                href="../mascot.png"
+                xlink:href="../mascot.png"
+                preserveAspectRatio="xMidYMin meet"
+                id="image11"
+            />
+        </g>
+        <g
+            id="terminal"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="16"
+        >
+            <rect
+                x="816"
+                y="42"
+                width="342"
+                height="330"
+                rx="12"
+                fill="#172338"
+                stroke="#344964"
+                id="rect12"
+            />
+            <rect
+                x="816"
+                y="42"
+                width="342"
+                height="48"
+                rx="12"
+                fill="#1e2d45"
+                id="rect13"
+            />
+            <path d="M816 78H1158" stroke="#344964" id="path13" />
+            <circle cx="842" cy="66" r="6" fill="#ff6b6b" id="circle13" />
+            <circle cx="863" cy="66" r="6" fill="#ffd166" id="circle14" />
+            <circle cx="884" cy="66" r="6" fill="#44d0cf" id="circle15" />
+            <text x="928" y="72" fill="#7f92aa" font-size="14" id="text15">
+                ~/.gdit
+            </text>
+            <text x="840" y="126" fill="#44d0cf" id="text16">$</text>
+            <text x="862" y="126" fill="#f7fafc" id="text17">
+                gdit install work
+            </text>
+            <text x="862" y="151" fill="#c4d0e3" id="text18">
+                --version 4.5.2 --current
+            </text>
+            <text x="840" y="198" fill="#a78bfa" id="text19">engine</text>
+            <text x="930" y="198" fill="#c4d0e3" id="text20">
+                4.5.2-standard
+            </text>
+            <text x="840" y="225" fill="#a78bfa" id="text21">instance</text>
+            <text x="930" y="225" fill="#c4d0e3" id="text22">work</text>
+            <text x="840" y="276" fill="#44d0cf" id="text23">$</text>
+            <text x="862" y="276" fill="#f7fafc" id="text24">
+                gdit default work
+            </text>
+            <text x="840" y="326" fill="#ffd166" id="text25">
+                $ godot --editor
+            </text>
+            <text x="840" y="351" fill="#8298b3" font-size="14" id="text26">
+                current entry → engine
+            </text>
+        </g>
     </g>
-
-    <g id="mascot" clip-path="url(#mascot-clip)">
-      <rect x="548" y="28" width="244" height="392" rx="20" fill="#172338" stroke="#344964"/>
-      <circle cx="671" cy="209" r="112" fill="#243451"/>
-      <image x="553" y="7" width="238" height="543" href="../mascot.png" xlink:href="../mascot.png"
-             preserveAspectRatio="xMidYMin meet"/>
-    </g>
-
-    <g id="terminal" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">
-      <rect x="816" y="42" width="342" height="330" rx="12" fill="#172338" stroke="#344964"/>
-      <rect x="816" y="42" width="342" height="48" rx="12" fill="#1e2d45"/>
-      <path d="M816 78H1158" stroke="#344964"/>
-      <circle cx="842" cy="66" r="6" fill="#ff6b6b"/>
-      <circle cx="863" cy="66" r="6" fill="#ffd166"/>
-      <circle cx="884" cy="66" r="6" fill="#44d0cf"/>
-      <text x="928" y="72" fill="#7f92aa" font-size="14">~/.gdit</text>
-
-      <text x="840" y="126" fill="#44d0cf">$</text>
-      <text x="862" y="126" fill="#f7fafc">gdit install work</text>
-      <text x="862" y="151" fill="#c4d0e3">--version 4.5.2 --current</text>
-
-      <text x="840" y="198" fill="#a78bfa">engine</text>
-      <text x="930" y="198" fill="#c4d0e3">4.5.2-standard</text>
-      <text x="840" y="225" fill="#a78bfa">instance</text>
-      <text x="930" y="225" fill="#c4d0e3">work</text>
-
-      <text x="840" y="276" fill="#44d0cf">$</text>
-      <text x="862" y="276" fill="#f7fafc">gdit default work</text>
-      <text x="840" y="326" fill="#ffd166">$ godot --editor</text>
-      <text x="840" y="351" fill="#8298b3" font-size="14">current entry → engine</text>
-    </g>
-  </g>
 </svg>
