@@ -41,13 +41,13 @@ func ExtractTarGz(filename, destination string) error {
 }
 
 func extractTarEntry(reader io.Reader, header *tar.Header, destination string) error {
-	name := filepath.Clean(filepath.FromSlash(header.Name))
+	name, err := cleanArchiveEntryPath(header.Name)
+	if err != nil {
+		return err
+	}
 	if name == "." {
 		// "./" 这类当前目录条目（微软 dotnet-sdk tar 包存在）安全且无内容，跳过。
 		return nil
-	}
-	if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("unsafe archive path %q", header.Name)
 	}
 	target := filepath.Join(destination, name)
 	if !within(destination, target) {
@@ -77,8 +77,8 @@ func extractTarEntry(reader io.Reader, header *tar.Header, destination string) e
 		}
 		return nil
 	case tar.TypeSymlink:
-		link := filepath.Clean(filepath.FromSlash(header.Linkname))
-		if filepath.IsAbs(link) || !within(destination, filepath.Join(filepath.Dir(target), link)) {
+		link, linkErr := cleanArchiveLinkPath(header.Linkname)
+		if linkErr != nil || !within(destination, filepath.Join(filepath.Dir(target), link)) {
 			return fmt.Errorf("archive symlink escapes destination %q", header.Name)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {

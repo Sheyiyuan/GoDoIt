@@ -44,13 +44,10 @@ type Manager struct {
 	sdkProbe func(context.Context) ([]SDKInfo, error)
 }
 
-// DefaultRoot 返回当前用户的 ~/.gdit 路径。
+// DefaultRoot 返回生效的 gdit 根目录：GDIT_ROOT 非空即用（必须是绝对路径），
+// 否则平台默认路径（~/.gdit/ 或 %USERPROFILE%\.gdit）。解析委托 platform 适配层。
 func DefaultRoot() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user home: %w", err)
-	}
-	return filepath.Join(home, ".gdit"), nil
+	return platform.ResolveRoot()
 }
 
 // New 创建 Manager。创建过程不访问网络，也不会创建用户目录。
@@ -343,7 +340,7 @@ func (m *Manager) SetDefaultSource(ctx context.Context, name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("%w: source name is required", ErrInvalidInput)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)
@@ -369,7 +366,7 @@ func (m *Manager) SetSourceDisabled(ctx context.Context, name string, disabled b
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("%w: source name is required", ErrInvalidInput)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)
@@ -637,7 +634,7 @@ func (m *Manager) SetDefault(ctx context.Context, name string) error {
 	if err := instance.ValidateName(name); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)
@@ -664,7 +661,7 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 	if !store.ValidID(id) {
 		return fmt.Errorf("%w: invalid version id %q", ErrInvalidInput, id)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)
@@ -708,11 +705,11 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 	return nil
 }
 
-// Setup 幂等创建或修复 ~/.gdit/bin/godot shim：它是指向 gdit 自身的 symlink。
-// 已存在且指向正确时不做任何事；指向错误或缺失时原子修复。不修改 shell 配置
-// 或系统 PATH。
+// Setup 幂等创建或修复 <根目录>/bin 下的平台 shim（Unix symlink / Windows godot.cmd）。
+// 已存在且指向当前 gdit 可执行文件时不做任何事；指向错误或缺失时原子修复。
+// 不修改 shell 配置或系统 PATH。
 func (m *Manager) Setup(ctx context.Context) error {
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return localIOError("create store root", err)
 	}
 	storeRoot := store.New(m.root)
@@ -849,6 +846,22 @@ func (a providerAdapter) Resolve(ctx context.Context, request SourceRequest) (Ar
 		Checksum:          result.Checksum,
 		AuthorizationEnv:  result.AuthorizationEnv,
 	}, nil
+}
+
+// authorizationEnv 返回来源的授权环境变量名（doctor 检查用）；无授权变量时返回空串。
+func (a providerAdapter) authorizationEnv() string {
+	if provider, ok := a.provider.(source.AuthorizationEnvProvider); ok {
+		return provider.AuthorizationEnvName()
+	}
+	return ""
+}
+
+// metadataEndpoint 返回来源的元数据端点（doctor --network 探测用）；无端点时返回空串。
+func (a providerAdapter) metadataEndpoint() string {
+	if provider, ok := a.provider.(source.MetadataProber); ok {
+		return provider.MetadataEndpoint()
+	}
+	return ""
 }
 
 func (m *Manager) download(ctx context.Context, artifact Artifact, destination, versionID string) error {

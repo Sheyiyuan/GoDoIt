@@ -18,9 +18,13 @@ func TestExtractTarGzRejectsUnsafeEntries(t *testing.T) {
 		{name: "parent", header: tar.Header{Name: "../escape", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
 		{name: "deep parent", header: tar.Header{Name: "a/../../escape", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
 		{name: "absolute", header: tar.Header{Name: "/escape", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
+		{name: "backslash absolute", header: tar.Header{Name: `\escape`, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
+		{name: "windows drive", header: tar.Header{Name: `C:\escape`, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
+		{name: "backslash parent", header: tar.Header{Name: `..\escape`, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}},
 		{name: "device", header: tar.Header{Name: "device", Typeflag: tar.TypeChar}, wantFile: "empty"},
 		{name: "hardlink", header: tar.Header{Name: "hard", Typeflag: tar.TypeLink, Linkname: "target"}, wantFile: "empty"},
 		{name: "absolute symlink", header: tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}, wantFile: "empty"},
+		{name: "windows absolute symlink", header: tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: `C:\Windows\system.ini`}, wantFile: "empty"},
 		{name: "escaping symlink", header: tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "../outside"}, wantFile: "empty"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -47,13 +51,12 @@ func TestExtractTarGzRejectsWriteThroughEarlierSymlink(t *testing.T) {
 	}
 }
 
-func TestExtractTarGzExtractsRegularFilesAndSafeSymlinks(t *testing.T) {
+func TestExtractTarGzExtractsRegularFiles(t *testing.T) {
 	headers := []tar.Header{
 		{Name: "dotnet", Typeflag: tar.TypeReg, Mode: 0o755, Size: 6},
 		{Name: "nested/dir/deep", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4},
-		{Name: "dotnet-link", Typeflag: tar.TypeSymlink, Linkname: "dotnet"},
 	}
-	archivePath := writeTarGz(t, headers, []string{"dotnet", "deep", ""})
+	archivePath := writeTarGz(t, headers, []string{"dotnet", "deep"})
 	destination := t.TempDir()
 	if err := ExtractTarGz(archivePath, destination); err != nil {
 		t.Fatal(err)

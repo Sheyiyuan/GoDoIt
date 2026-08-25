@@ -287,18 +287,23 @@ func TestSetupIsIdempotentAndDoesNotModifyPATH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", "/fixture/bin")
+	originalPath := filepath.Join(root, "fixture-bin")
+	t.Setenv("PATH", originalPath)
 	if err := manager.Setup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Setup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("PATH") != "/fixture/bin" {
+	if os.Getenv("PATH") != originalPath {
 		t.Fatalf("setup modified PATH: %q", os.Getenv("PATH"))
 	}
-	if _, err := os.Readlink(filepath.Join(root, "bin", "godot")); err != nil {
-		t.Fatalf("shim was not created: %v", err)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, correct := platform.CheckShim(root, executable); !created || !correct {
+		t.Fatalf("shim was not created correctly: created=%v correct=%v", created, correct)
 	}
 }
 

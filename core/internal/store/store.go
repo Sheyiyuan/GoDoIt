@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"golang.org/x/sys/unix"
 
+	"github.com/Sheyiyuan/GoDoIt/core/internal/platform"
 	managedversion "github.com/Sheyiyuan/GoDoIt/core/internal/version"
 )
 
@@ -26,7 +26,7 @@ var instanceIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3
 // ErrDestinationExists 表示目标资产目录已经存在，不能覆盖。
 var ErrDestinationExists = errors.New("asset destination already exists")
 
-// ErrNoCurrent 表示 current symlink 未设置或已悬空。
+// ErrNoCurrent 表示 current 指针未设置或已悬空。
 var ErrNoCurrent = errors.New("current instance is not set")
 
 // Manifest 是版本目录内的安装完成标记。
@@ -82,11 +82,14 @@ type Store struct {
 
 // New 创建一个不会立即访问磁盘的 Store。
 func New(root string) *Store {
-	return &Store{Root: root, syncDir: syncDirectory}
+	return &Store{Root: root, syncDir: platform.SyncDir}
 }
 
 // Init 创建安装操作需要的目录。
 func (s *Store) Init() error {
+	if err := os.MkdirAll(s.Root, 0o700); err != nil {
+		return fmt.Errorf("create store root: %w", err)
+	}
 	for _, path := range []string{s.EnginesDir(), s.SDKsDir(), s.InstancesDir(), s.TmpDir()} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create store directory: %w", err)
@@ -122,8 +125,8 @@ func (s *Store) CurrentPath() string { return filepath.Join(s.Root, "current") }
 // BinDir 返回用户级命令目录。
 func (s *Store) BinDir() string { return filepath.Join(s.Root, "bin") }
 
-// ShimPath 返回 godot shim 的 symlink 路径。
-func (s *Store) ShimPath() string { return filepath.Join(s.BinDir(), "godot") }
+// ShimPath 返回 godot shim 路径（平台形态：Unix symlink / Windows godot.cmd）。
+func (s *Store) ShimPath() string { return platform.ShimPath(s.Root) }
 
 // ValidID 报告版本 ID 是否符合合法格式（三段数字版本 + standard/dotnet）。
 func ValidID(id string) bool { return managedversion.ValidEngineID(id) }
@@ -131,33 +134,26 @@ func ValidID(id string) bool { return managedversion.ValidEngineID(id) }
 // SDKDir 返回指定托管 SDK 目录。
 func (s *Store) SDKDir(version string) string { return filepath.Join(s.SDKsDir(), version) }
 
-// ReadCurrent 读取 current symlink 指向的条目名。
-// 链接不存在或目标悬空时返回 ErrNoCurrent；目标位置非法时返回普通错误。
+// ReadCurrent 读取 current 指针指向的条目 UUID（平台形态见 platform：Unix symlink /
+// Windows 重定向文件，契约一致）。
+// 指针不存在或目标悬空时返回 ErrNoCurrent；目标位置非法时返回普通错误。
 func (s *Store) ReadCurrent() (string, error) {
-	target, err := os.Readlink(s.CurrentPath())
+	target, err := platform.ReadCurrentPointer(s.Root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", ErrNoCurrent
 		}
-		return "", fmt.Errorf("read current link: %w", err)
+		return "", fmt.Errorf("read current pointer: %w", err)
 	}
-	filename := filepath.Base(filepath.Clean(target))
-	if filepath.Ext(filename) != ".toml" {
-		return "", fmt.Errorf("current link has invalid target %q", target)
-	}
-	name := strings.TrimSuffix(filename, ".toml")
-	if !instanceIDPattern.MatchString(name) {
-		return "", fmt.Errorf("current link has invalid target %q", target)
-	}
-	expectedTarget := filepath.Join("instances", filename)
-	if target != expectedTarget {
-		return "", fmt.Errorf("current link must point to %s", expectedTarget)
+	name, err := platform.ParseCurrentPointer(target)
+	if err != nil {
+		return "", err
 	}
 	resolved := filepath.Join(s.Root, target)
 	info, err := os.Lstat(resolved)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%w: current link is dangling", ErrNoCurrent)
+			return "", fmt.Errorf("%w: current pointer is dangling", ErrNoCurrent)
 		}
 		return "", fmt.Errorf("inspect current target: %w", err)
 	}
@@ -167,47 +163,22 @@ func (s *Store) ReadCurrent() (string, error) {
 	return name, nil
 }
 
-// SetCurrent 原子地把 current symlink 替换为指向指定条目（相对路径 instances/<uuid>.toml）。
-// replaceSymlink 内部已同步父目录，失败时旧链接保持不变。
+// SetCurrent 原子地把 current 指针替换为指向指定条目（相对路径 instances/<uuid>.toml）。
+// 平台实现内部已同步父目录，失败时旧指针保持不变。
 func (s *Store) SetCurrent(id string) error {
 	if !instanceIDPattern.MatchString(id) {
 		return fmt.Errorf("invalid instance id %q", id)
 	}
-	if err := replaceSymlink(s.CurrentPath(), filepath.Join("instances", id+".toml"), s.syncDir); err != nil {
-		return fmt.Errorf("set current link: %w", err)
+	if err := platform.WriteCurrentPointer(s.Root, filepath.Join("instances", id+".toml")); err != nil {
+		return fmt.Errorf("set current pointer: %w", err)
 	}
 	return nil
 }
 
-// EnsureShim 幂等创建或修复指向 gdit 可执行文件的 godot shim。
-// 已存在且指向目标时不做任何事；指向错误、缺失或是普通文件/空目录时原子重建
-// （非空目录占用 shim 路径时报错，不递归删除，避免误删用户数据）。
+// EnsureShim 幂等创建或修复 godot shim（平台形态：Unix symlink 指向 gdit 可执行文件 /
+// Windows godot.cmd 包装）。
 func (s *Store) EnsureShim(target string) error {
-	if err := os.MkdirAll(s.BinDir(), 0o755); err != nil {
-		return fmt.Errorf("create bin directory: %w", err)
-	}
-	info, err := os.Lstat(s.ShimPath())
-	switch {
-	case err == nil && info.Mode()&os.ModeSymlink != 0:
-		existing, readErr := os.Readlink(s.ShimPath())
-		if readErr != nil {
-			return fmt.Errorf("read shim link: %w", readErr)
-		}
-		if existing == target {
-			return nil
-		}
-	case err == nil:
-		if err := os.Remove(s.ShimPath()); err != nil {
-			return fmt.Errorf("remove stale shim: %w", err)
-		}
-	case errors.Is(err, os.ErrNotExist):
-	default:
-		return fmt.Errorf("inspect shim: %w", err)
-	}
-	if err := replaceSymlink(s.ShimPath(), target, syncDirectory); err != nil {
-		return fmt.Errorf("create shim: %w", err)
-	}
-	return nil
+	return platform.EnsureShim(s.Root, target)
 }
 
 // ScanValid 扫描有效安装目录，不读取或写入状态索引。
@@ -298,7 +269,7 @@ func (s *Store) Publish(staging, id string) (published bool, err error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("check destination: %w", err)
 	}
-	if err := os.Rename(staging, destination); err != nil {
+	if err := platform.RenameAtomic(staging, destination); err != nil {
 		return false, fmt.Errorf("publish version: %w", err)
 	}
 	if err := s.syncDir(s.EnginesDir()); err != nil {
@@ -318,7 +289,7 @@ func (s *Store) PublishSDK(staging, version string) (published bool, err error) 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("check SDK destination: %w", err)
 	}
-	if err := os.Rename(staging, destination); err != nil {
+	if err := platform.RenameAtomic(staging, destination); err != nil {
 		return false, fmt.Errorf("publish SDK: %w", err)
 	}
 	if err := s.syncDir(s.SDKsDir()); err != nil {
@@ -397,6 +368,40 @@ func ReadSDKManifest(path string) (SDKManifest, error) {
 	return manifest, nil
 }
 
+// InspectEngineDir 检查单个引擎资产目录是否为完整安装，返回原因；nil 表示完整。
+// 校验规则与 ScanValid 一致（目录名合法 + install.toml 可解析 + launcher 有效），
+// 供 doctor 逐条报告无效目录的原因，不复制规则。
+func InspectEngineDir(dir string) error {
+	name := filepath.Base(dir)
+	if !ValidID(name) {
+		return fmt.Errorf("invalid engine directory name %q", name)
+	}
+	manifest, err := ReadManifest(filepath.Join(dir, "install.toml"))
+	if err != nil {
+		return fmt.Errorf("read install.toml: %w", err)
+	}
+	if err := validateManifest(manifest, name, dir); err != nil {
+		return fmt.Errorf("invalid install.toml: %w", err)
+	}
+	return nil
+}
+
+// InspectSDKDir 检查单个托管 SDK 目录是否为完整安装，返回原因；nil 表示完整。
+func InspectSDKDir(dir string) error {
+	version := filepath.Base(dir)
+	if !managedversion.ValidSDK(version) {
+		return fmt.Errorf("invalid SDK directory name %q", version)
+	}
+	manifest, err := ReadSDKManifest(filepath.Join(dir, "install.toml"))
+	if err != nil {
+		return fmt.Errorf("read install.toml: %w", err)
+	}
+	if err := validateSDKManifest(manifest, version, dir); err != nil {
+		return fmt.Errorf("invalid install.toml: %w", err)
+	}
+	return nil
+}
+
 func validateManifest(manifest Manifest, id, dir string) error {
 	if manifest.ID != id || !managedversion.ValidEngineID(manifest.ID) || manifest.ID != manifest.Version+"-"+manifest.Edition || manifest.TargetOS == "" || manifest.TargetArch == "" || manifest.Source == "" || manifest.Launcher == "" {
 		return errors.New("invalid manifest")
@@ -426,15 +431,14 @@ func validateManifest(manifest Manifest, id, dir string) error {
 	if !within(payload, launcher) {
 		return errors.New("launcher escapes payload")
 	}
-	info, err := os.Lstat(launcher)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+	if err := platform.ValidateLauncher(launcher); err != nil {
 		return errors.New("launcher is missing")
 	}
 	return nil
 }
 
 func validateSDKManifest(manifest SDKManifest, version, dir string) error {
-	if manifest.Version != version || !managedversion.ValidSDK(version) || manifest.TargetOS == "" || manifest.TargetArch == "" || manifest.Source == "" || manifest.Launcher != "dotnet" {
+	if manifest.Version != version || !managedversion.ValidSDK(version) || manifest.TargetOS == "" || manifest.TargetArch == "" || manifest.Source == "" || manifest.Launcher != platform.SDKLauncherName() {
 		return errors.New("invalid SDK manifest")
 	}
 	if manifest.ChecksumAlgorithm != "sha512" || len(manifest.Checksum) != 128 {
@@ -446,9 +450,7 @@ func validateSDKManifest(manifest SDKManifest, version, dir string) error {
 	if _, err := time.Parse(time.RFC3339, manifest.InstalledAt); err != nil {
 		return errors.New("invalid SDK installation time")
 	}
-	launcher := filepath.Join(dir, manifest.Launcher)
-	info, err := os.Lstat(launcher)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+	if err := platform.ValidateLauncher(filepath.Join(dir, manifest.Launcher)); err != nil {
 		return errors.New("SDK launcher is missing")
 	}
 	return nil
@@ -496,11 +498,11 @@ func stateEqual(left, right State) bool {
 	return true
 }
 
-// WriteTOMLAtomic 以临时文件、rename 和父目录同步原子写入 TOML。
+// WriteTOMLAtomic 以临时文件、原子替换和父目录同步写入 TOML。
 func WriteTOMLAtomic(path string, value any) error { return writeTOMLAtomic(path, value) }
 
-// SyncDirectory 把目录项变更同步到磁盘。
-func SyncDirectory(path string) error { return syncDirectory(path) }
+// SyncDirectory 把目录项变更同步到磁盘（平台能力封装）。
+func SyncDirectory(path string) error { return platform.SyncDir(path) }
 
 // RemoveEngine 删除指定引擎资产目录。
 func (s *Store) RemoveEngine(id string) error {
@@ -510,7 +512,7 @@ func (s *Store) RemoveEngine(id string) error {
 	if err := os.RemoveAll(s.EngineDir(id)); err != nil {
 		return err
 	}
-	return syncDirectory(s.EnginesDir())
+	return platform.SyncDir(s.EnginesDir())
 }
 
 // RemoveSDK 删除指定托管 SDK 资产目录。
@@ -521,7 +523,7 @@ func (s *Store) RemoveSDK(version string) error {
 	if err := os.RemoveAll(s.SDKDir(version)); err != nil {
 		return err
 	}
-	return syncDirectory(s.SDKsDir())
+	return platform.SyncDir(s.SDKsDir())
 }
 
 // DirectorySize 返回目录内普通文件占用的总字节数。
@@ -587,90 +589,10 @@ func writeTOMLAtomic(path string, value any) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
+	if err := platform.RenameAtomic(temporaryPath, path); err != nil {
 		return err
 	}
-	return syncDirectory(directory)
-}
-
-func syncDirectory(path string) error {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY, 0)
-	if err != nil {
-		return err
-	}
-	defer unix.Close(fd)
-	return unix.Fsync(fd)
-}
-
-// replaceSymlink 原子地创建或替换 linkPath 处的 symlink：先在目标目录创建临时
-// symlink，rename 覆盖后同步父目录。同步失败时把链接回滚到调用前状态，再返回错误。
-// sync 参数注入目录同步实现，供测试注入失败。
-func replaceSymlink(linkPath, target string, sync func(string) error) error {
-	directory := filepath.Dir(linkPath)
-	oldTarget, oldErr := os.Readlink(linkPath)
-	hadOld := oldErr == nil
-	if oldErr != nil && !errors.Is(oldErr, os.ErrNotExist) {
-		return fmt.Errorf("read existing link: %w", oldErr)
-	}
-	temporaryPath, err := createTemporarySymlink(directory, target)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporaryPath)
-	if err := os.Rename(temporaryPath, linkPath); err != nil {
-		return fmt.Errorf("replace symlink: %w", err)
-	}
-	if err := sync(directory); err != nil {
-		rollbackErr := restoreSymlink(linkPath, oldTarget, hadOld, directory, sync)
-		if rollbackErr != nil {
-			return fmt.Errorf("sync link directory: %v; rollback failed: %w", err, rollbackErr)
-		}
-		return fmt.Errorf("sync link directory: %w", err)
-	}
-	return nil
-}
-
-func createTemporarySymlink(directory, target string) (string, error) {
-	temporary, err := os.CreateTemp(directory, ".gdit-link-*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("create temporary link: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	if err := temporary.Close(); err != nil {
-		os.Remove(temporaryPath)
-		return "", fmt.Errorf("close temporary link: %w", err)
-	}
-	if err := os.Remove(temporaryPath); err != nil {
-		return "", fmt.Errorf("prepare temporary link: %w", err)
-	}
-	if err := os.Symlink(target, temporaryPath); err != nil {
-		return "", fmt.Errorf("create temporary symlink: %w", err)
-	}
-	return temporaryPath, nil
-}
-
-func restoreSymlink(linkPath, oldTarget string, hadOld bool, directory string, sync func(string) error) error {
-	if !hadOld {
-		if err := os.Remove(linkPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove replacement link: %w", err)
-		}
-		if err := sync(directory); err != nil {
-			return fmt.Errorf("sync rollback directory: %w", err)
-		}
-		return nil
-	}
-	temporaryPath, err := createTemporarySymlink(directory, oldTarget)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporaryPath)
-	if err := os.Rename(temporaryPath, linkPath); err != nil {
-		return fmt.Errorf("restore previous symlink: %w", err)
-	}
-	if err := sync(directory); err != nil {
-		return fmt.Errorf("sync rollback directory: %w", err)
-	}
-	return nil
+	return platform.SyncDir(directory)
 }
 
 func within(root, path string) bool {

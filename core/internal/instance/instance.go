@@ -150,6 +150,14 @@ func Validate(item *File, filename string) error {
 			return fmt.Errorf("invalid environment variable %q: %w", key, err)
 		}
 	}
+	seenEnvironmentKeys := make(map[string]string, len(item.Env))
+	for key := range item.Env {
+		normalized := config.NormalizeEnvironmentKey(key)
+		if previous, exists := seenEnvironmentKeys[normalized]; exists && previous != key {
+			return fmt.Errorf("environment keys %q and %q conflict on this platform", previous, key)
+		}
+		seenEnvironmentKeys[normalized] = key
+	}
 	return nil
 }
 
@@ -165,6 +173,18 @@ func Path(root, id string) string {
 
 // Read 按存储标识符读取并完整校验指定条目及其引擎引用。
 func Read(root, id string) (File, error) {
+	item, err := readDefinition(root, id)
+	if err != nil {
+		return File{}, err
+	}
+	if err := validateEngineReference(root, item); err != nil {
+		return File{}, err
+	}
+	return item, nil
+}
+
+// readDefinition 读取并校验条目文件本身，不检查其资产引用是否完整。
+func readDefinition(root, id string) (File, error) {
 	if !ValidID(id) {
 		return File{}, fmt.Errorf("invalid instance id %q", id)
 	}
@@ -181,9 +201,6 @@ func Read(root, id string) (File, error) {
 		return File{}, fmt.Errorf("decode instance: %w", err)
 	}
 	if err := Validate(&item, path); err != nil {
-		return File{}, err
-	}
-	if err := validateEngineReference(root, item); err != nil {
 		return File{}, err
 	}
 	return item, nil
@@ -207,9 +224,10 @@ func Lookup(root, name string) (File, error) {
 	return File{}, os.ErrNotExist
 }
 
-// Scan 失败关闭地扫描全部 *.toml 条目并校验其引擎引用。
+// ScanDefinitions 扫描并校验全部 *.toml 条目定义，但不检查资产引用是否完整。
+// 该入口供 doctor 在引擎或 SDK 缺失时继续收集全部引用故障；普通业务应使用 Scan。
 // 显示名重复属于坏条目，会使整个扫描失败。
-func Scan(root string) ([]File, error) {
+func ScanDefinitions(root string) ([]File, error) {
 	directory := filepath.Join(root, "instances")
 	entries, err := os.ReadDir(directory)
 	if errors.Is(err, os.ErrNotExist) {
@@ -229,7 +247,7 @@ func Scan(root string) ([]File, error) {
 			return nil, fmt.Errorf("instance candidate %q is not a readable regular file", entry.Name())
 		}
 		id := strings.TrimSuffix(entry.Name(), ".toml")
-		item, readErr := Read(root, id)
+		item, readErr := readDefinition(root, id)
 		if readErr != nil {
 			return nil, fmt.Errorf("invalid instance %q: %w", id, readErr)
 		}
@@ -240,6 +258,20 @@ func Scan(root string) ([]File, error) {
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items, nil
+}
+
+// Scan 失败关闭地扫描全部 *.toml 条目并校验其引擎引用。
+func Scan(root string) ([]File, error) {
+	items, err := ScanDefinitions(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if err := validateEngineReference(root, item); err != nil {
+			return nil, fmt.Errorf("invalid instance %q: %w", item.ID, err)
+		}
+	}
 	return items, nil
 }
 
@@ -308,8 +340,13 @@ func SetEnv(root, id, key, value string, remove bool) error {
 	if environment == nil {
 		environment = make(map[string]any)
 	}
+	key = config.NormalizeEnvironmentKey(key)
+	for existing := range environment {
+		if config.NormalizeEnvironmentKey(existing) == key {
+			delete(environment, existing)
+		}
+	}
 	if remove {
-		delete(environment, key)
 	} else {
 		environment[key] = value
 	}

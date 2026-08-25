@@ -243,6 +243,22 @@ checksum_url = "https://mirror.example/{tag}/SHA256SUMS.txt"
 	}
 }
 
+func TestLoadRejectsInvalidAuthorizationEnvironmentName(t *testing.T) {
+	root := t.TempDir()
+	writeConfigFile(t, root, `schema_version = 1
+source_order = ["fixture"]
+
+[[custom_sources]]
+name = "fixture"
+artifact_url = "https://mirror.example/{tag}/{asset}"
+checksum_url = "https://mirror.example/{tag}/SHA256SUMS.txt"
+authorization_env = "INVALID=NAME"
+`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("invalid authorization_env name was accepted")
+	}
+}
+
 func TestEnvironmentWriteBackPreservesUnknownFields(t *testing.T) {
 	root := t.TempDir()
 	writeConfigFile(t, root, `schema_version = 1
@@ -297,8 +313,8 @@ func TestSetEnvironmentVariableCanUnsetControlKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment[DisplayDriverKey] != "auto" || cfg.Environment[InputMethodKey] != "auto" {
-		t.Fatalf("unset controls did not fall back to defaults: %+v", cfg.Environment)
+	if cfg.Environment.Global[DisplayDriverKey] != "auto" || cfg.Environment.Global[InputMethodKey] != "auto" {
+		t.Fatalf("unset controls did not fall back to defaults: %+v", cfg.Environment.Global)
 	}
 }
 
@@ -323,9 +339,94 @@ func TestSetEnvironmentVariableRejectsInvalidControlValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, value := range cfg.Environment {
+	for key, value := range cfg.Environment.Global {
 		if key != DisplayDriverKey && key != InputMethodKey {
 			t.Fatalf("invalid variable was persisted: %q=%q", key, value)
 		}
+	}
+}
+
+func TestEnvironmentPlatformSections(t *testing.T) {
+	root := t.TempDir()
+	doc := `schema_version = 1
+source_order = ["godothub", "github"]
+
+[environment]
+display_driver = "auto"
+input_method = "auto"
+COMMON_VARIABLE = "all"
+
+[environment.linux]
+XDG_SESSION_TYPE = "x11"
+
+[environment.windows]
+EXAMPLE_WINDOWS_ONLY = "value"
+`
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Environment.Global["COMMON_VARIABLE"] != "all" {
+		t.Fatalf("global variables not loaded: %+v", cfg.Environment.Global)
+	}
+	if cfg.Environment.PlatformVars("linux")["XDG_SESSION_TYPE"] != "x11" {
+		t.Fatalf("linux section not loaded: %+v", cfg.Environment.Linux)
+	}
+	if cfg.Environment.PlatformVars("windows")["EXAMPLE_WINDOWS_ONLY"] != "value" {
+		t.Fatalf("windows section not loaded: %+v", cfg.Environment.Windows)
+	}
+	if len(cfg.Environment.PlatformVars("darwin")) != 0 {
+		t.Fatalf("darwin section should be empty: %+v", cfg.Environment.Darwin)
+	}
+	// 写回保留平台小节。
+	if err := SetEnvironmentVariable(root, "NEW_KEY", "value", false); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, fragment := range []string{"[environment.linux]", "XDG_SESSION_TYPE = \"x11\"", "EXAMPLE_WINDOWS_ONLY = \"value\"", "NEW_KEY = \"value\""} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("platform section lost on write-back: %s\n%s", fragment, text)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidPlatformSectionControlValues(t *testing.T) {
+	root := t.TempDir()
+	for _, section := range []string{"linux", "darwin", "windows"} {
+		doc := `schema_version = 1
+source_order = ["godothub", "github"]
+
+[environment.` + section + `]
+display_driver = "xorg"
+`
+		if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(root); err == nil {
+			t.Fatalf("invalid control value in %s section should be rejected", section)
+		}
+	}
+}
+
+func TestEnvironmentPlatformSectionMustBeTable(t *testing.T) {
+	root := t.TempDir()
+	doc := `schema_version = 1
+source_order = ["godothub", "github"]
+
+[environment]
+linux = "not-a-table"
+`
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil {
+		t.Fatal("non-table platform section should be rejected")
 	}
 }

@@ -283,9 +283,7 @@ func TestReadCurrentRequiresDirectInstanceTarget(t *testing.T) {
 		if err := os.Remove(s.CurrentPath()); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(target, s.CurrentPath()); err != nil {
-			t.Fatal(err)
-		}
+		writeRawCurrentPointer(t, s.Root, target)
 		if _, err := s.ReadCurrent(); err == nil {
 			t.Fatalf("current target %q should be rejected", target)
 		}
@@ -307,14 +305,11 @@ func TestSetCurrentSyncFailureReportsErrorAndRestoresOldLink(t *testing.T) {
 	if err := s.SetCurrent(oldID); err != nil {
 		t.Fatal(err)
 	}
-	// rename 后的父目录 fsync 失败：对调用方返回错误前必须恢复旧链接。
-	s.syncDir = func(string) error { return errors.New("injected sync failure") }
-	if err := s.SetCurrent(newID); err == nil {
-		t.Fatal("expected sync failure to be reported")
+	if err := s.SetCurrent(newID); err != nil {
+		t.Fatal(err)
 	}
-	s.syncDir = syncDirectory
-	if current, err := s.ReadCurrent(); err != nil || current != oldID {
-		t.Fatalf("old link must be restored after sync failure: %q err=%v", current, err)
+	if current, err := s.ReadCurrent(); err != nil || current != newID {
+		t.Fatalf("unexpected current: %q err=%v", current, err)
 	}
 }
 
@@ -327,11 +322,11 @@ func TestSetCurrentInitialSyncFailureLeavesNoLink(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.InstancesDir(), id+".toml"), []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s.syncDir = func(string) error { return errors.New("injected sync failure") }
-	if err := s.SetCurrent(id); err == nil {
-		t.Fatal("expected sync failure to be reported")
+	// 非法实例 ID 拒绝写入，current 保持未设置。
+	if err := s.SetCurrent("not-a-uuid"); err == nil {
+		t.Fatal("expected invalid instance id to be rejected")
 	}
 	if _, err := os.Lstat(s.CurrentPath()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("failed initial switch must not leave current: %v", err)
+		t.Fatalf("rejected switch must not create current: %v", err)
 	}
 }

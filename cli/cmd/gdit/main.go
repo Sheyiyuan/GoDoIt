@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/AlecAivazis/survey/v2"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	gdit "github.com/Sheyiyuan/GoDoIt/core"
@@ -45,6 +44,7 @@ type managerAPI interface {
 	UnsetEnvVar(context.Context, string, string) error
 	Remove(context.Context, string) error
 	Setup(context.Context) error
+	Doctor(context.Context, bool) (gdit.DoctorReport, error)
 }
 
 var stdinIsTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
@@ -52,13 +52,6 @@ var stdoutIsTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 
 var askInteractive = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
 	return survey.AskOne(prompt, response, append(opts, survey.WithStdio(os.Stdin, os.Stderr, os.Stderr))...)
-}
-
-var replaceProcess = func(executable string, engineArgs, environment []string) error {
-	if environment == nil {
-		environment = os.Environ()
-	}
-	return unix.Exec(executable, append([]string{executable}, engineArgs...), environment)
 }
 
 var spawnProcess = func(executable string, engineArgs, environment []string, stdout, stderr io.Writer) int {
@@ -107,8 +100,6 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func isShimInvocation(argv0 string) bool { return filepath.Base(argv0) == "godot" }
-
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root, err := gdit.DefaultRoot()
 	if err != nil {
@@ -135,6 +126,10 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 	switch args[0] {
 	case "install", "i", "new":
 		return runInstall(ctx, args[1:], stdout, stderr, manager, renderer)
+	case "__shim":
+		// Windows：godot.cmd 包装调用 __shim 进入 shim 路径（参数直通引擎、不过命令解析）；
+		// Unix 的 shim 靠 argv[0] 判断，此分支不经过（手动调用无害，行为一致）。
+		return runShim(ctx, args[1:], stderr, manager)
 	case "list", "l":
 		return runList(ctx, args[1:], stdout, stderr, manager)
 	case "default", "d":
@@ -157,6 +152,8 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return runAvailable(ctx, args[1:], stdout, stderr, manager)
 	case "setup", "st":
 		return runSetup(ctx, root, args[1:], stdout, stderr, manager)
+	case "doctor":
+		return runDoctor(ctx, args[1:], stdout, stderr, manager)
 	case "help", "h", "-h", "--help":
 		writeUsage(stdout)
 		return 0
@@ -842,11 +839,7 @@ func runShim(ctx context.Context, args []string, stderr io.Writer, manager manag
 		return 1
 	}
 	arguments := append(append([]string{}, target.Args...), args...)
-	if err := replaceProcess(target.Executable, arguments, target.Env); err != nil {
-		writeErrorf(stderr, "launch %s: %v", target.Executable, err)
-		return 1
-	}
-	return 0
+	return launchEngine(target.Executable, arguments, target.Env, stderr)
 }
 
 func runSource(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
@@ -936,18 +929,79 @@ func runSetup(ctx context.Context, root string, args []string, stdout, stderr io
 		writeError(stderr, err)
 		return 1
 	}
-	shim := filepath.Join(root, "bin", "godot")
+	shim := filepath.Join(root, shimRelativePath())
 	fmt.Fprintf(stdout, "godot shim ready at %s\n", shim)
 	if !pathContainsDir(filepath.Dir(shim)) {
-		fmt.Fprintf(stderr, "hint: add %s to PATH to use the godot command\n", filepath.Dir(shim))
+		fmt.Fprintf(stderr, "hint: %s\n", pathHint(filepath.Dir(shim)))
 	}
 	return 0
 }
 
+// runDoctor 执行环境诊断并渲染报告：结果写 stdout，逐项一行 [OK]/[WARN]/[ERROR]
+// 前缀（非 TTY 也保持，机器可读）；退出码 0 = 无错误，1 = 存在错误，警告不影响。
+func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, manager managerAPI) int {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	network := flags.Bool("network", false, "探测来源可达性")
+	verbose := flags.Bool("verbose", false, "展开细节")
+	handled, ok := parseFlags(flags, args, stdout)
+	if handled {
+		if ok {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 0 {
+		return usage(stderr, "gdit doctor [--network] [--verbose]")
+	}
+	report, err := manager.Doctor(ctx, *network)
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "根目录：%s\n", report.Root)
+	for _, item := range report.Items {
+		fmt.Fprintf(stdout, "%s %s\n", doctorStatusPrefix(item.Status), item.Message)
+		if *verbose {
+			for _, detail := range item.Details {
+				fmt.Fprintf(stdout, "      %s\n", detail)
+			}
+			if item.Suggest != "" {
+				fmt.Fprintf(stdout, "      建议：%s\n", item.Suggest)
+			}
+		}
+	}
+	fmt.Fprintf(stdout, "%d 项正常，%d 项警告，%d 项错误\n", report.OKCount, report.WarnCount, report.ErrorCount)
+	if report.ErrorCount > 0 {
+		return 1
+	}
+	return 0
+}
+
+// doctorStatusPrefix 返回状态前缀（TTY 下着色；NO_COLOR 或非 TTY 纯文本）。
+func doctorStatusPrefix(status gdit.CheckStatus) string {
+	label := "[OK]"
+	switch status {
+	case gdit.StatusWarn:
+		label = "[WARN]"
+	case gdit.StatusError:
+		label = "[ERROR]"
+	}
+	if os.Getenv("NO_COLOR") != "" || !stdoutIsTTY() {
+		return label
+	}
+	switch status {
+	case gdit.StatusWarn:
+		return ansiYellow + label + ansiReset
+	case gdit.StatusError:
+		return ansiRed + label + ansiReset
+	}
+	return ansiGreen + label + ansiReset
+}
+
 func pathContainsDir(directory string) bool {
-	clean := filepath.Clean(directory)
 	for _, item := range filepath.SplitList(os.Getenv("PATH")) {
-		if filepath.Clean(item) == clean {
+		if equalPath(item, directory) {
 			return true
 		}
 	}
@@ -1129,11 +1183,12 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (handled, 
 
 func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "usage: gdit <command> [options]")
-	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, env (e), autoremove, source (s), available (a), setup (st)")
+	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, env (e), autoremove, source (s), available (a), setup (st), doctor")
 	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current]")
 	fmt.Fprintln(writer, "  engine [list] | install [options] <version>... | remove [-y] <version>")
 	fmt.Fprintln(writer, "  sdk [list] | available | install <version> | remove [-y] <version>")
 	fmt.Fprintln(writer, "  env [--instance <name>] | set <KEY=VALUE> [--instance <name>] | unset <KEY> [--instance <name>]")
 	fmt.Fprintln(writer, "  autoremove [-y|--yes]")
 	fmt.Fprintln(writer, "  run [<name>|-d] [-- <engine args>]")
+	fmt.Fprintln(writer, "  doctor [--network] [--verbose]")
 }

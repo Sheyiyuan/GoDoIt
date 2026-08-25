@@ -39,6 +39,7 @@ type fakeManager struct {
 	launchNames     *[]string
 	sources         []gdit.SourceInfo
 	available       []gdit.EngineChannel
+	doctorReport    gdit.DoctorReport
 	err             error
 }
 
@@ -117,6 +118,9 @@ func (f fakeManager) UnsetEnvVar(_ context.Context, name, key string) error {
 }
 func (f fakeManager) Remove(context.Context, string) error { return f.err }
 func (f fakeManager) Setup(context.Context) error          { return f.err }
+func (f fakeManager) Doctor(context.Context, bool) (gdit.DoctorReport, error) {
+	return f.doctorReport, f.err
+}
 
 func TestInstallParsesEntryFlagsAfterName(t *testing.T) {
 	var request gdit.InstallEntryRequest
@@ -265,18 +269,34 @@ func TestRunWithoutArgsTTYNoInstancesGivesHint(t *testing.T) {
 }
 
 func TestSpawnProcessUsesProvidedEnvironment(t *testing.T) {
-	script := filepath.Join(t.TempDir(), "print-env.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s' \"$GDIT_CHILD_ONLY\"\n"), 0o755); err != nil {
+	executable, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := spawnProcess(script, nil, []string{"PATH=" + os.Getenv("PATH"), "GDIT_CHILD_ONLY=child"}, &stdout, &stderr)
+	environment := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GDIT_CHILD_ONLY=child",
+		"GDIT_TEST_HELPER=1",
+	}
+	if coverDir := os.Getenv("GOCOVERDIR"); coverDir != "" {
+		environment = append(environment, "GOCOVERDIR="+coverDir)
+	}
+	code := spawnProcess(executable, []string{"-test.run=^TestSpawnProcessHelper$"}, environment, &stdout, &stderr)
 	if code != 0 || stdout.String() != "child" || stderr.Len() != 0 {
 		t.Fatalf("unexpected child result: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if os.Getenv("GDIT_CHILD_ONLY") != "" {
 		t.Fatal("spawn modified the parent environment")
 	}
+}
+
+func TestSpawnProcessHelper(t *testing.T) {
+	if os.Getenv("GDIT_TEST_HELPER") != "1" {
+		return
+	}
+	_, _ = io.WriteString(os.Stdout, os.Getenv("GDIT_CHILD_ONLY"))
+	os.Exit(0)
 }
 
 func TestEnvSetAcceptsInstanceFlagAfterAssignment(t *testing.T) {
@@ -369,18 +389,20 @@ func TestManagerErrorsGoToStderr(t *testing.T) {
 }
 
 func TestRunSetupHintsWhenNotInPATH(t *testing.T) {
-	t.Setenv("PATH", "/fixture/bin")
+	root := t.TempDir()
+	t.Setenv("PATH", filepath.Join(root, "elsewhere"))
 	var stdout, stderr bytes.Buffer
-	code := runSetup(context.Background(), "/tmp/gdit-test", nil, &stdout, &stderr, fakeManager{})
-	if code != 0 || !strings.Contains(stdout.String(), "godot shim ready at") || !strings.Contains(stderr.String(), "add /tmp/gdit-test/bin to PATH") {
+	code := runSetup(context.Background(), root, nil, &stdout, &stderr, fakeManager{})
+	if code != 0 || !strings.Contains(stdout.String(), "godot shim ready at") || !strings.Contains(stderr.String(), pathHint(filepath.Join(root, "bin"))) {
 		t.Fatalf("unexpected setup result: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
 func TestRunSetupNoHintWhenBinInPATH(t *testing.T) {
-	t.Setenv("PATH", "/tmp/gdit-test/bin:/fixture/bin")
+	root := t.TempDir()
+	t.Setenv("PATH", strings.Join([]string{filepath.Join(root, "bin"), filepath.Join(root, "elsewhere")}, string(os.PathListSeparator)))
 	var stdout, stderr bytes.Buffer
-	code := runSetup(context.Background(), "/tmp/gdit-test", nil, &stdout, &stderr, fakeManager{})
+	code := runSetup(context.Background(), root, nil, &stdout, &stderr, fakeManager{})
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("setup should not hint when bin is on PATH: code=%d stderr=%q", code, stderr.String())
 	}
@@ -395,13 +417,13 @@ func TestRunSetupReportsManagerError(t *testing.T) {
 }
 
 func TestRunShimExecutesCurrentWithPassthroughArgs(t *testing.T) {
-	original := replaceProcess
-	defer func() { replaceProcess = original }()
+	original := launchEngine
+	defer func() { launchEngine = original }()
 	var gotArgs, gotEnv []string
-	replaceProcess = func(_ string, args, environment []string) error {
+	launchEngine = func(_ string, args, environment []string, _ io.Writer) int {
 		gotArgs = append([]string(nil), args...)
 		gotEnv = append([]string(nil), environment...)
-		return nil
+		return 0
 	}
 	var names []string
 	manager := fakeManager{launchNames: &names, launchTarget: gdit.LaunchTarget{Executable: "/engine", Args: []string{"--display-driver", "wayland"}, Env: []string{"A=B"}}}
@@ -724,3 +746,134 @@ func runCommand(t *testing.T, manager managerAPI, args ...string) (string, strin
 	code := runWithManager(context.Background(), "/tmp/gdit-test", args, &stdout, &stderr, manager, nil)
 	return stdout.String(), stderr.String(), code
 }
+
+func TestDoctorRendersReportAndExitCodes(t *testing.T) {
+	originalTTY := stdoutIsTTY
+	stdoutIsTTY = func() bool { return false }
+	defer func() { stdoutIsTTY = originalTTY }()
+	t.Setenv("NO_COLOR", "")
+	report := gdit.DoctorReport{
+		Root: "/tmp/gdit-test",
+		Items: []gdit.CheckResult{
+			{Code: "root-dir", Status: gdit.StatusOK, Message: "根目录存在"},
+			{Code: "shim", Status: gdit.StatusWarn, Message: "shim 未创建", Suggest: "运行 gdit setup", Details: []string{"包装目标不存在"}},
+			{Code: "current", Status: gdit.StatusError, Message: "current 悬空", Suggest: "运行 gdit default <name>"},
+		},
+		OKCount: 1, WarnCount: 1, ErrorCount: 1,
+	}
+	stdout, stderr, code := runCommand(t, fakeManager{doctorReport: report}, "doctor")
+	if code != 1 || stderr != "" {
+		t.Fatalf("unexpected doctor result: code=%d stderr=%q", code, stderr)
+	}
+	for _, fragment := range []string{"[OK] 根目录存在", "[WARN] shim 未创建", "[ERROR] current 悬空", "1 项正常，1 项警告，1 项错误"} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("missing %q in stdout: %q", fragment, stdout)
+		}
+	}
+	if strings.Contains(stdout, "建议") {
+		t.Fatalf("suggestions should be hidden without --verbose: %q", stdout)
+	}
+	if strings.Contains(stdout, "包装目标不存在") {
+		t.Fatalf("details should be hidden without --verbose: %q", stdout)
+	}
+}
+
+func TestDoctorVerboseShowsSuggestions(t *testing.T) {
+	originalTTY := stdoutIsTTY
+	stdoutIsTTY = func() bool { return false }
+	defer func() { stdoutIsTTY = originalTTY }()
+	report := gdit.DoctorReport{
+		Items: []gdit.CheckResult{
+			{Code: "shim", Status: gdit.StatusWarn, Message: "shim 未创建", Suggest: "运行 gdit setup", Details: []string{"包装目标不存在"}},
+		},
+		WarnCount: 1,
+	}
+	stdout, _, code := runCommand(t, fakeManager{doctorReport: report}, "doctor", "--verbose")
+	if code != 0 || !strings.Contains(stdout, "建议：运行 gdit setup") || !strings.Contains(stdout, "包装目标不存在") {
+		t.Fatalf("unexpected verbose doctor output: code=%d stdout=%q", code, stdout)
+	}
+}
+
+func TestDoctorExitZeroWithoutErrors(t *testing.T) {
+	originalTTY := stdoutIsTTY
+	stdoutIsTTY = func() bool { return false }
+	defer func() { stdoutIsTTY = originalTTY }()
+	report := gdit.DoctorReport{
+		Items: []gdit.CheckResult{
+			{Code: "state", Status: gdit.StatusWarn, Message: "state 不一致"},
+		},
+		WarnCount: 1,
+	}
+	_, _, code := runCommand(t, fakeManager{doctorReport: report}, "doctor")
+	if code != 0 {
+		t.Fatalf("warnings must not affect exit code: %d", code)
+	}
+}
+
+func TestDoctorNetworkFlagPassed(t *testing.T) {
+	var gotNetwork bool
+	manager := &doctorCaptureManager{doctorReport: gdit.DoctorReport{}, network: &gotNetwork}
+	runCommand(t, manager, "doctor", "--network")
+	if !gotNetwork {
+		t.Fatal("--network flag was not passed to Doctor")
+	}
+}
+
+type doctorCaptureManager struct {
+	doctorReport gdit.DoctorReport
+	network      *bool
+}
+
+func (m *doctorCaptureManager) Doctor(_ context.Context, network bool) (gdit.DoctorReport, error) {
+	*m.network = network
+	return m.doctorReport, nil
+}
+
+// 补齐 managerAPI 其余方法（doctorCaptureManager 只覆盖 Doctor）。
+func (m *doctorCaptureManager) Install(context.Context, gdit.InstallRequest) (gdit.InstallResult, error) {
+	return gdit.InstallResult{}, nil
+}
+func (m *doctorCaptureManager) List(context.Context) ([]gdit.InstalledVersion, error) {
+	return nil, nil
+}
+func (m *doctorCaptureManager) Sources(context.Context) ([]gdit.SourceInfo, error)    { return nil, nil }
+func (m *doctorCaptureManager) SetDefaultSource(context.Context, string) error        { return nil }
+func (m *doctorCaptureManager) SetSourceDisabled(context.Context, string, bool) error { return nil }
+func (m *doctorCaptureManager) Available(context.Context, string) ([]gdit.EngineChannel, error) {
+	return nil, nil
+}
+func (m *doctorCaptureManager) InstallEntry(context.Context, gdit.InstallEntryRequest) (gdit.InstallEntryResult, error) {
+	return gdit.InstallEntryResult{}, nil
+}
+func (m *doctorCaptureManager) RemoveInstance(context.Context, string) (gdit.RemoveInstanceResult, error) {
+	return gdit.RemoveInstanceResult{}, nil
+}
+func (m *doctorCaptureManager) Instances(context.Context) ([]gdit.InstanceInfo, error) {
+	return nil, nil
+}
+func (m *doctorCaptureManager) Default(context.Context) (gdit.InstanceInfo, error) {
+	return gdit.InstanceInfo{}, nil
+}
+func (m *doctorCaptureManager) SetDefault(context.Context, string) error { return nil }
+func (m *doctorCaptureManager) ResolveLaunch(context.Context, string) (gdit.LaunchTarget, error) {
+	return gdit.LaunchTarget{}, nil
+}
+func (m *doctorCaptureManager) Orphans(context.Context) ([]gdit.OrphanAsset, error) { return nil, nil }
+func (m *doctorCaptureManager) AutoRemove(context.Context) (gdit.AutoRemoveResult, error) {
+	return gdit.AutoRemoveResult{}, nil
+}
+func (m *doctorCaptureManager) SDKs(context.Context) ([]gdit.SDKInfo, error) { return nil, nil }
+func (m *doctorCaptureManager) AvailableSDKs(context.Context) ([]gdit.SDKChannel, error) {
+	return nil, nil
+}
+func (m *doctorCaptureManager) InstallSDK(context.Context, string) (gdit.SDKInstallResult, error) {
+	return gdit.SDKInstallResult{}, nil
+}
+func (m *doctorCaptureManager) RemoveSDK(context.Context, string) error { return nil }
+func (m *doctorCaptureManager) EffectiveEnv(context.Context, string) (gdit.EnvView, error) {
+	return gdit.EnvView{}, nil
+}
+func (m *doctorCaptureManager) SetEnvVar(context.Context, string, string, string) error { return nil }
+func (m *doctorCaptureManager) UnsetEnvVar(context.Context, string, string) error       { return nil }
+func (m *doctorCaptureManager) Remove(context.Context, string) error                    { return nil }
+func (m *doctorCaptureManager) Setup(context.Context) error                             { return nil }

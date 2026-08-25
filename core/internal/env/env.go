@@ -1,4 +1,6 @@
 // Package env 合并启动子进程环境，并计算平台与 SDK 派生变量。
+// 平台差异（显示驱动参数、fcitx 变量）按编译标签拆分到 env_linux.go /
+// env_darwin.go / env_windows.go；本文件只保留合并顺序与通用逻辑。
 package env
 
 import (
@@ -24,15 +26,17 @@ type Result struct {
 	Args []string
 }
 
-// Build 按父环境、全局、条目、派生变量的顺序构建启动环境。
+// Build 按父环境、全局、平台小节、条目、派生变量的顺序构建启动环境。
+// platformSection 为当前平台的 [environment.<os>] 小节（可为 nil/空），覆盖全局同名键；
 // managedSDKDir 为空表示不注入托管 SDK；用户配置 DOTNET_ROOT 时调用方也应传空。
-func Build(parent []string, global, local map[string]string, target platform.Target, managedSDKDir string) Result {
+func Build(parent []string, global, platformSection, local map[string]string, target platform.Target, managedSDKDir string) Result {
 	merged := parse(parent)
-	delete(merged, config.DisplayDriverKey)
-	delete(merged, config.InputMethodKey)
+	delete(merged, platform.NormalizeEnvKey(config.DisplayDriverKey))
+	delete(merged, platform.NormalizeEnvKey(config.InputMethodKey))
 	origins := make(map[string]string)
 	controls := map[string]string{config.DisplayDriverKey: "auto", config.InputMethodKey: "auto"}
 	applyConfigured(merged, origins, controls, global, "global")
+	applyConfigured(merged, origins, controls, platformSection, "platform")
 	applyConfigured(merged, origins, controls, local, "instance")
 
 	args := displayArgs(target, controls[config.DisplayDriverKey])
@@ -69,11 +73,11 @@ func Build(parent []string, global, local map[string]string, target platform.Tar
 	return Result{Full: full, Vars: vars, Args: args}
 }
 
-// ExplicitDotnetRoot 报告全局或条目配置是否由用户显式接管 DOTNET_ROOT。
-func ExplicitDotnetRoot(global, local map[string]string) bool {
-	_, globalSet := global["DOTNET_ROOT"]
-	_, localSet := local["DOTNET_ROOT"]
-	return globalSet || localSet
+// ExplicitDotnetRoot 报告全局、平台小节或条目配置是否由用户显式接管 DOTNET_ROOT。
+func ExplicitDotnetRoot(global, platformSection, local map[string]string) bool {
+	return hasEnvironmentKey(global, "DOTNET_ROOT") ||
+		hasEnvironmentKey(platformSection, "DOTNET_ROOT") ||
+		hasEnvironmentKey(local, "DOTNET_ROOT")
 }
 
 func parse(entries []string) map[string]string {
@@ -81,10 +85,20 @@ func parse(entries []string) map[string]string {
 	for _, entry := range entries {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
-			result[key] = value
+			result[platform.NormalizeEnvKey(key)] = value
 		}
 	}
 	return result
+}
+
+func hasEnvironmentKey(values map[string]string, expected string) bool {
+	expected = platform.NormalizeEnvKey(expected)
+	for key := range values {
+		if platform.NormalizeEnvKey(key) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func applyConfigured(merged map[string]string, origins map[string]string, controls map[string]string, values map[string]string, origin string) {
@@ -93,34 +107,8 @@ func applyConfigured(merged map[string]string, origins map[string]string, contro
 			controls[key] = value
 			continue
 		}
+		key = platform.NormalizeEnvKey(key)
 		merged[key] = value
 		origins[key] = origin
-	}
-}
-
-func displayArgs(target platform.Target, driver string) []string {
-	if !platform.IsLinux(target) || driver == "" || driver == "auto" {
-		return nil
-	}
-	return []string{"--display-driver", driver}
-}
-
-func applyInputMethod(merged map[string]string, origins map[string]string, target platform.Target, mode string) {
-	if !platform.IsLinux(target) || mode == "off" {
-		return
-	}
-	if mode == "auto" && !platform.DetectFcitx(target, merged) {
-		return
-	}
-	for key, value := range map[string]string{
-		"XMODIFIERS":    "@im=fcitx",
-		"GTK_IM_MODULE": "fcitx",
-		"QT_IM_MODULE":  "fcitx",
-	} {
-		if _, exists := merged[key]; exists {
-			continue
-		}
-		merged[key] = value
-		origins[key] = "derived"
 	}
 }
