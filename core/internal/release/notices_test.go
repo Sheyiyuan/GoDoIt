@@ -1,11 +1,47 @@
 package release
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestCommandStdoutIgnoresSuccessfulStderr(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=TestCommandStdoutHelper")
+	command.Env = append(os.Environ(), "GDIT_RELEASE_COMMAND_HELPER=success")
+	output, err := commandStdout(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "{\"Module\":null}\n" {
+		t.Fatalf("stdout = %q", output)
+	}
+}
+
+func TestCommandStdoutIncludesFailedStderr(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=TestCommandStdoutHelper")
+	command.Env = append(os.Environ(), "GDIT_RELEASE_COMMAND_HELPER=failure")
+	_, err := commandStdout(command)
+	if err == nil || !strings.Contains(err.Error(), "go list fixture failed") {
+		t.Fatalf("错误 = %v，期望包含 stderr", err)
+	}
+}
+
+func TestCommandStdoutHelper(t *testing.T) {
+	switch os.Getenv("GDIT_RELEASE_COMMAND_HELPER") {
+	case "success":
+		fmt.Fprintln(os.Stdout, `{"Module":null}`)
+		fmt.Fprintln(os.Stderr, "go: downloading fixture")
+		os.Exit(0)
+	case "failure":
+		fmt.Fprintln(os.Stderr, "go list fixture failed")
+		os.Exit(1)
+	}
+}
 
 func TestRuntimeNPMDependenciesUsesProductionClosure(t *testing.T) {
 	lock := `lockfileVersion: '9.0'

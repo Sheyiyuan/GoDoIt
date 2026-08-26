@@ -201,9 +201,9 @@ func runtimeGoDependencies(root string) (map[string]string, error) {
 		command := exec.Command("go", "list", "-deps", "-json", "./cli/cmd/gdit", "./gui")
 		command.Dir = root
 		command.Env = environmentWith(os.Environ(), target)
-		output, err := command.CombinedOutput()
+		output, err := commandStdout(command)
 		if err != nil {
-			return nil, fmt.Errorf("枚举 %s/%s Go 运行时依赖：%w：%s", target["GOOS"], target["GOARCH"], err, strings.TrimSpace(string(output)))
+			return nil, fmt.Errorf("枚举 %s/%s Go 运行时依赖：%w", target["GOOS"], target["GOARCH"], err)
 		}
 		decoder := json.NewDecoder(bytes.NewReader(output))
 		for {
@@ -223,6 +223,21 @@ func runtimeGoDependencies(root string) (map[string]string, error) {
 		}
 	}
 	return result, nil
+}
+
+func commandStdout(command *exec.Cmd) ([]byte, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		diagnostic := strings.TrimSpace(stderr.String())
+		if diagnostic != "" {
+			return nil, fmt.Errorf("%w：%s", err, diagnostic)
+		}
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }
 
 func environmentWith(environment []string, overrides map[string]string) []string {
