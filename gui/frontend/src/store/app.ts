@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
-import type { AppSnapshot, EngineChannel, GUISettings, InstanceInfo, OperationRecord, ProgressEnvelope, SDKChannel } from '../types'
+import type { AppSnapshot, CandidateWarning, EngineChannel, GUISettings, InstanceInfo, OperationRecord, ProgressEnvelope, SDKChannel, SessionInfo } from '../types'
 import { operationResultSummary, sanitizeOperationText } from '../lib/operationRecord'
 
 interface ModalState {
@@ -20,8 +20,13 @@ interface AppState {
   dismissedWarnings: Record<string, true>
   modal: ModalState | null
   toast: string
-  engineCandidates: Record<string, { status: 'idle' | 'loading' | 'ready' | 'error'; items: EngineChannel[]; error?: string }>
-  sdkCandidates: { status: 'idle' | 'loading' | 'ready' | 'error'; items: SDKChannel[]; error?: string }
+  engineCandidates: Record<string, { status: 'idle' | 'loading' | 'ready' | 'error'; items: EngineChannel[]; warnings: CandidateWarning[]; error?: string }>
+  sdkCandidates: { status: 'idle' | 'loading' | 'ready' | 'error'; items: SDKChannel[]; warnings: CandidateWarning[]; error?: string }
+  sessions: SessionInfo[]
+  sessionsLoading: boolean
+  sessionError: string
+  sessionRevision: number
+  terminalSessions: Record<string, true>
   load: () => Promise<void>
   handleProgress: (event: ProgressEnvelope) => void
   updateGUISettings: (settings: GUISettings) => Promise<void>
@@ -34,9 +39,16 @@ interface AppState {
   prefetchCandidates: () => Promise<void>
   refreshEngineCandidates: (source?: string) => Promise<void>
   refreshSDKCandidates: () => Promise<void>
+  handleSession: (session: SessionInfo) => void
+  refreshSessions: () => Promise<void>
+  launchSession: (name: string) => Promise<SessionInfo>
+  requestStopSession: (id: string) => Promise<SessionInfo>
+  forceStopSession: (id: string) => Promise<SessionInfo>
 }
 
-export const useAppStore = create<AppState>((set) => ({
+let sessionRefresh: Promise<void> | null = null
+
+export const useAppStore = create<AppState>((set, get) => ({
   snapshot: null,
   loading: true,
   error: '',
@@ -46,7 +58,12 @@ export const useAppStore = create<AppState>((set) => ({
   modal: null,
   toast: '',
   engineCandidates: {},
-  sdkCandidates: { status: 'idle', items: [] },
+  sdkCandidates: { status: 'idle', items: [], warnings: [] },
+  sessions: [],
+  sessionsLoading: false,
+  sessionError: '',
+  sessionRevision: 0,
+  terminalSessions: {},
   load: async () => {
     set({ loading: true, error: '' })
     try {
@@ -130,22 +147,87 @@ export const useAppStore = create<AppState>((set) => ({
   refreshEngineCandidates: async (source = '') => {
     const current = useAppStore.getState().engineCandidates[source]
     if (current?.status === 'loading') return
-    set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'loading', items: current?.items || [] } } }))
+    set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'loading', items: current?.items || [], warnings: current?.warnings || [] } } }))
     try {
-      const items = await api.ListAvailableVersions(source)
-      set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'ready', items } } }))
+      const result = await api.ListAvailableVersions(source)
+      set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'ready', items: result.channels, warnings: result.warnings } } }))
     } catch (error) {
-      set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'error', items: current?.items || [], error: error instanceof Error ? error.message : String(error) } } }))
+      set((state) => ({ engineCandidates: { ...state.engineCandidates, [source]: { status: 'error', items: current?.items || [], warnings: current?.warnings || [], error: error instanceof Error ? error.message : String(error) } } }))
     }
   },
   refreshSDKCandidates: async () => {
     if (useAppStore.getState().sdkCandidates.status === 'loading') return
     set((state) => ({ sdkCandidates: { ...state.sdkCandidates, status: 'loading' } }))
     try {
-      const items = await api.ListAvailableSDKs()
-      set({ sdkCandidates: { status: 'ready', items } })
+      const result = await api.ListAvailableSDKs()
+      set({ sdkCandidates: { status: 'ready', items: result.channels, warnings: result.warnings } })
     } catch (error) {
-      set((state) => ({ sdkCandidates: { status: 'error', items: state.sdkCandidates.items, error: error instanceof Error ? error.message : String(error) } }))
+      set((state) => ({ sdkCandidates: { status: 'error', items: state.sdkCandidates.items, warnings: state.sdkCandidates.warnings, error: error instanceof Error ? error.message : String(error) } }))
+    }
+  },
+  handleSession: (session) => set((state) => {
+    if (session.status === 'exited' || session.status === 'lost') {
+      return {
+        sessions: state.sessions.filter((item) => item.session_id !== session.session_id),
+        sessionError: '',
+        sessionRevision: state.sessionRevision + 1,
+        terminalSessions: { ...state.terminalSessions, [session.session_id]: true },
+      }
+    }
+    if (state.terminalSessions[session.session_id]) return {}
+    const sessions = state.sessions.filter((item) => item.session_id !== session.session_id)
+    sessions.push(session)
+    sessions.sort((left, right) => right.started_at.localeCompare(left.started_at))
+    return { sessions, sessionError: '', sessionRevision: state.sessionRevision + 1 }
+  }),
+  refreshSessions: async () => {
+    if (sessionRefresh) return sessionRefresh
+    const revision = get().sessionRevision
+    set({ sessionsLoading: true })
+    sessionRefresh = (async () => {
+      try {
+        const result = await api.ListSessions()
+        set((state) => {
+          if (state.sessionRevision !== revision) return { sessionsLoading: false, sessionError: '' }
+          const sessions = result.sessions.filter((item) => (item.status === 'running' || item.status === 'stopping') && !state.terminalSessions[item.session_id])
+          return { sessions, sessionsLoading: false, sessionError: '', sessionRevision: state.sessionRevision + 1 }
+        })
+      } catch (error) {
+        set({ sessionsLoading: false, sessionError: error instanceof Error ? error.message : String(error) })
+      } finally {
+        sessionRefresh = null
+      }
+    })()
+    return sessionRefresh
+  },
+  launchSession: async (name) => {
+    try {
+      const session = await api.LaunchSession(name)
+      get().handleSession(session)
+      return session
+    } catch (error) {
+      set({ sessionError: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+  requestStopSession: async (id) => {
+    try {
+      const session = await api.RequestStopSession(id)
+      get().handleSession(session)
+      return session
+    } catch (error) {
+      set({ sessionError: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+  forceStopSession: async (id) => {
+    try {
+      const session = await api.ForceStopSession(id)
+      get().handleSession(session)
+      return session
+    } catch (error) {
+      set({ sessionError: error instanceof Error ? error.message : String(error) })
+      throw error
     }
   },
 }))

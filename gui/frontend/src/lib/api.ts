@@ -3,12 +3,14 @@ import type {
   AssetSnapshot,
   DoctorReport,
   EnvironmentDetails,
+  EngineCandidateResult,
   EngineChannel,
   InstallEntryRequest,
   InstallSuggestionRequest,
   InstanceDetails,
   OperationStart,
   ProjectSuggestion,
+  SDKCandidateResult,
   SDKChannel,
   SetInstanceIconRequest,
   SourceInfo,
@@ -60,6 +62,41 @@ const demoVersions: EngineChannel[] = [
   { name: 'unstable', versions: [{ version: '4.8-dev3', editions: ['standard', 'dotnet'], sources: ['godothub'] }] },
 ]
 
+const demoGlobalEnvironment: Record<string, string> = {
+  GODOT_EDITOR_SCALE: '1.1',
+  GITHUB_TOKEN: 'demo-token-value',
+}
+const demoInstanceEnvironment: Record<string, Record<string, string>> = {
+  'studio-csharp': { GODOT4_EDITOR_SETTINGS_PATH: '/home/demo/.config/godot-studio', INSTANCE_TOKEN: 'studio-secret' },
+  'preview-lab': { GODOT_LOG_LEVEL: 'debug' },
+}
+let demoSessions: SessionInfo[] = []
+let demoPID = 4600
+
+function demoEnvironment(name: string): EnvironmentDetails {
+  const configured: EnvironmentDetails['configured']['vars'] = [
+    ...Object.entries(demoGlobalEnvironment).map(([key, value]) => ({ key, value, scope: 'global' as const, editable: true, sensitive: sensitiveEnvironmentKey(key) })),
+    { key: 'DISPLAY_BACKEND', value: 'wayland', scope: 'platform' as const, editable: false, sensitive: false },
+  ]
+  if (name) {
+    configured.push(...Object.entries(demoInstanceEnvironment[name] || {}).map(([key, value]) => ({ key, value, scope: 'instance' as const, editable: true, sensitive: sensitiveEnvironmentKey(key) })))
+  }
+  const effective = new Map<string, { key: string; value: string; origin: string; sensitive: boolean }>()
+  configured.forEach((item) => effective.set(item.key, { key: item.key, value: item.value, origin: item.scope, sensitive: item.sensitive }))
+  if (name === 'studio-csharp') {
+    effective.set('DOTNET_ROOT', { key: 'DOTNET_ROOT', value: '/home/demo/.gdit/sdks/8.0.410', origin: 'derived', sensitive: false })
+  }
+  return { configured: { vars: configured }, effective: { vars: [...effective.values()], args: [] } }
+}
+
+function sensitiveEnvironmentKey(key: string) {
+  return /(TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY)/i.test(key)
+}
+
+function emitDemoSession(session: SessionInfo) {
+  window.dispatchEvent(new CustomEvent('gdit:session', { detail: clone(session) }))
+}
+
 function demoVersionsForSource(source: string): EngineChannel[] {
   if (!source) return clone(demoVersions)
   return demoVersions
@@ -95,9 +132,13 @@ export const api = {
   GetGUISettings: () => backend() ? call<GUISettings>('GetGUISettings') : Promise.resolve(clone(demoSnapshot.gui)),
   SetGUISettings: (settings: GUISettings) => backend() ? call<void>('SetGUISettings', settings) : Promise.resolve().then(() => { demoSnapshot.gui = clone(settings) }),
   ListAssets: () => backend() ? call<AssetSnapshot>('ListAssets') : Promise.resolve(clone(demoSnapshot.assets)),
-  GetInstanceDetails: (name: string) => backend() ? call<InstanceDetails>('GetInstanceDetails', name) : Promise.resolve({ instance: clone(demoSnapshot.instances.find((item) => item.name === name)!), env: { vars: name === 'studio-csharp' ? [{ key: 'DOTNET_ROOT', value: '/home/demo/.gdit/sdks/8.0.410', origin: 'derived' }, { key: 'PATH', value: '/home/demo/.gdit/sdks/8.0.410:…', origin: 'derived' }] : [], args: [] }, configured_env: { vars: [] }, templates: clone(demoSnapshot.assets.templates) }),
-  ListAvailableVersions: (source = '') => backend() ? call<EngineChannel[]>('ListAvailableVersions', source) : Promise.resolve(demoVersionsForSource(source)),
-  ListAvailableSDKs: () => backend() ? call<SDKChannel[]>('ListAvailableSDKs') : Promise.resolve([{ major_minor: '10.0', phase: 'active', release_type: 'lts', versions: ['10.0.103'] }, { major_minor: '8.0', phase: 'maintenance', release_type: 'lts', versions: ['8.0.410', '8.0.408'] }]),
+  GetInstanceDetails: (name: string) => {
+    if (backend()) return call<InstanceDetails>('GetInstanceDetails', name)
+    const environment = demoEnvironment(name)
+    return Promise.resolve({ instance: clone(demoSnapshot.instances.find((item) => item.name === name)!), env: { vars: environment.effective.vars.map(({ key, value, origin }) => ({ key, value, origin })), args: environment.effective.args }, configured_env: environment.configured, templates: clone(demoSnapshot.assets.templates) })
+  },
+  ListAvailableVersions: (source = '') => backend() ? call<EngineCandidateResult>('ListAvailableVersions', source) : Promise.resolve({ channels: demoVersionsForSource(source), warnings: [] }),
+  ListAvailableSDKs: () => backend() ? call<SDKCandidateResult>('ListAvailableSDKs') : Promise.resolve({ channels: [{ major_minor: '10.0', phase: 'active', release_type: 'lts', versions: ['10.0.103'] }, { major_minor: '8.0', phase: 'maintenance', release_type: 'lts', versions: ['8.0.410', '8.0.408'] }], warnings: [] }),
   GetDoctor: (network: boolean) => backend() ? call<OperationStart>('GetDoctor', network) : demoOperation('doctor', () => clone(demoSnapshot.doctor)),
   Suggest: (projectDir: string) => backend() ? call<OperationStart>('Suggest', projectDir) : demoOperation('suggest', () => ({ project_dir: projectDir, engine_series: '4.5', edition: 'dotnet', sdk_strategy: 'managed', sdk_version: '8.0.410', sdk_channel: '8.0', installable: true, evidence: [{ kind: 'project-feature', path: `${projectDir}/project.godot`, value: '4.5, C#' }, { kind: 'global-json', path: `${projectDir}/global.json`, value: '8.0.410' }, { kind: 'target-framework', path: `${projectDir}/Game.csproj`, value: 'net8.0' }], diagnostics: [{ level: 'warning', code: 'missing-csproj-peer', path: `${projectDir}/project.godot`, message: '建议确认所有 C# 项目文件位于同一目录' }] } satisfies ProjectSuggestion)),
   InstallEntry: (request: InstallEntryRequest) => backend() ? call<OperationStart>('InstallEntry', request) : demoOperation('install-entry', () => {
@@ -113,14 +154,37 @@ export const api = {
   AttachTemplate: (name: string, source = '') => backend() ? call<OperationStart>('AttachTemplate', name, source) : demoOperation('attach-template', () => ({ instance: { name }, template: { id: demoSnapshot.instances.find((item) => item.name === name)?.engine }, installed: true })),
   DetachTemplate: (name: string) => backend() ? call<OperationStart>('DetachTemplate', name) : demoOperation('detach-template', () => ({ instance: { name } })),
   SetInstanceIcon: (name: string, request: SetInstanceIconRequest) => backend() ? call<OperationStart>('SetInstanceIcon', name, request) : demoOperation('set-instance-icon', () => { const item = demoSnapshot.instances.find((entry) => entry.name === name)!; item.icon = request.icon; item.resolved_icon = request.icon === 'default' ? (item.edition === 'dotnet' ? 'csharp' : 'godot') : request.icon as InstanceDetails['instance']['resolved_icon']; item.icon_background = request.background || ''; return clone(item) }),
-  GetEnvironment: (name: string) => backend() ? call<EnvironmentDetails>('GetEnvironment', name) : Promise.resolve({ configured: { vars: [] }, effective: { vars: [], args: [] } }),
-  ListSessions: () => backend() ? call<{ sessions: SessionInfo[] }>('ListSessions') : Promise.resolve({ sessions: [] }),
-  LaunchSession: (name: string) => backend() ? call<SessionInfo>('LaunchSession', name) : Promise.resolve({ session_id: crypto.randomUUID(), instance_id: '', instance_name: name, engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'running' as const }),
-  RequestStopSession: (id: string) => backend() ? call<SessionInfo>('RequestStopSession', id) : Promise.resolve({ session_id: id, instance_id: '', instance_name: '', engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'stopping' as const }),
-  ForceStopSession: (id: string) => backend() ? call<SessionInfo>('ForceStopSession', id) : Promise.resolve({ session_id: id, instance_id: '', instance_name: '', engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'exited' as const }),
+  GetEnvironment: (name: string) => backend() ? call<EnvironmentDetails>('GetEnvironment', name) : Promise.resolve(clone(demoEnvironment(name))),
+  ListSessions: () => backend() ? call<{ sessions: SessionInfo[] }>('ListSessions') : Promise.resolve({ sessions: clone(demoSessions) }),
+  LaunchSession: async (name: string) => {
+    if (backend()) return call<SessionInfo>('LaunchSession', name)
+    const instance = demoSnapshot.instances.find((item) => item.name === name)
+    if (!instance) throw new Error(`条目不存在：${name}`)
+    const session: SessionInfo = { session_id: crypto.randomUUID(), instance_id: instance.id, instance_name: name, engine_id: instance.engine, pid: demoPID++, started_at: new Date().toISOString(), status: 'running' }
+    demoSessions.push(session)
+    emitDemoSession(session)
+    return clone(session)
+  },
+  RequestStopSession: async (id: string) => {
+    if (backend()) return call<SessionInfo>('RequestStopSession', id)
+    const session = demoSessions.find((item) => item.session_id === id)
+    if (!session) throw new Error(`会话不存在：${id}`)
+    session.status = 'stopping'
+    emitDemoSession(session)
+    return clone(session)
+  },
+  ForceStopSession: async (id: string) => {
+    if (backend()) return call<SessionInfo>('ForceStopSession', id)
+    const session = demoSessions.find((item) => item.session_id === id)
+    if (!session) throw new Error(`会话不存在：${id}`)
+    const exited: SessionInfo = { ...session, status: 'exited' }
+    demoSessions = demoSessions.filter((item) => item.session_id !== id)
+    emitDemoSession(exited)
+    return clone(exited)
+  },
   SetDefault: async (name: string) => { if (backend()) return call<void>('SetDefault', name); demoSnapshot.instances.forEach((item) => { item.current = item.name === name }); demoSnapshot.current = demoSnapshot.instances.find((item) => item.name === name) },
-  SetEnvVar: (scope: string, key: string, value: string) => backend() ? call<void>('SetEnvVar', scope, key, value) : Promise.resolve(),
-  UnsetEnvVar: (scope: string, key: string) => backend() ? call<void>('UnsetEnvVar', scope, key) : Promise.resolve(),
+  SetEnvVar: (scope: string, key: string, value: string) => backend() ? call<void>('SetEnvVar', scope, key, value) : Promise.resolve().then(() => { const target = scope ? (demoInstanceEnvironment[scope] ||= {}) : demoGlobalEnvironment; target[key] = value }),
+  UnsetEnvVar: (scope: string, key: string) => backend() ? call<void>('UnsetEnvVar', scope, key) : Promise.resolve().then(() => { const target = scope ? demoInstanceEnvironment[scope] : demoGlobalEnvironment; if (target) delete target[key] }),
   ListSources: () => backend() ? call<SourceInfo[]>('ListSources') : Promise.resolve(clone(demoSnapshot.assets.sources)),
   SetSourceDisabled: async (name: string, disabled: boolean) => { if (backend()) return call<void>('SetSourceDisabled', name, disabled); const source = demoSnapshot.assets.sources.find((item) => item.name === name); if (source) source.disabled = disabled },
   SetDefaultSource: async (name: string) => { if (backend()) return call<void>('SetDefaultSource', name); demoSnapshot.assets.sources.sort((item) => item.name === name ? -1 : 1) },

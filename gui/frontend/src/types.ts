@@ -109,8 +109,17 @@ export interface InstanceDetails {
 
 export interface EnvironmentDetails {
   configured: ConfiguredEnvView
-  effective: EnvView
+  effective: EffectiveEnvView
   effective_error?: string
+}
+
+export interface EffectiveEnvVar extends EnvVar {
+  sensitive: boolean
+}
+
+export interface EffectiveEnvView {
+  vars: EffectiveEnvVar[]
+  args: string[]
 }
 
 export interface SessionInfo {
@@ -145,6 +154,7 @@ export interface BuildInfo {
   version: string
   go_version: string
   commit?: string
+  build_date?: string
 }
 
 export interface AppSnapshot {
@@ -174,6 +184,21 @@ export interface SDKChannel {
   phase: string
   release_type: string
   versions: string[]
+}
+
+export interface CandidateWarning {
+  source?: string
+  message: string
+}
+
+export interface EngineCandidateResult {
+  channels: EngineChannel[]
+  warnings: CandidateWarning[]
+}
+
+export interface SDKCandidateResult {
+  channels: SDKChannel[]
+  warnings: CandidateWarning[]
 }
 
 export interface SuggestDiagnostic {

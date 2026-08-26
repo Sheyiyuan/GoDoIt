@@ -4,6 +4,7 @@ export namespace bridge {
 	    version: string;
 	    go_version: string;
 	    commit?: string;
+	    build_date?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new BuildInfo(source);
@@ -14,6 +15,7 @@ export namespace bridge {
 	        this.version = source["version"];
 	        this.go_version = source["go_version"];
 	        this.commit = source["commit"];
+	        this.build_date = source["build_date"];
 	    }
 	}
 	export class AssetSnapshot {
@@ -100,9 +102,105 @@ export namespace bridge {
 	}
 
 
+	export class CandidateWarning {
+	    source?: string;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CandidateWarning(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.source = source["source"];
+	        this.message = source["message"];
+	    }
+	}
+	export class EffectiveEnvVar {
+	    key: string;
+	    value: string;
+	    origin: string;
+	    sensitive: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new EffectiveEnvVar(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.origin = source["origin"];
+	        this.sensitive = source["sensitive"];
+	    }
+	}
+	export class EffectiveEnvView {
+	    vars: EffectiveEnvVar[];
+	    args: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new EffectiveEnvView(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.vars = this.convertValues(source["vars"], EffectiveEnvVar);
+	        this.args = source["args"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class EngineCandidateResult {
+	    channels: gdit.EngineChannel[];
+	    warnings: CandidateWarning[];
+
+	    static createFrom(source: any = {}) {
+	        return new EngineCandidateResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.channels = this.convertValues(source["channels"], gdit.EngineChannel);
+	        this.warnings = this.convertValues(source["warnings"], CandidateWarning);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class EnvironmentDetails {
 	    configured: gdit.ConfiguredEnvView;
-	    effective: gdit.EnvView;
+	    effective: EffectiveEnvView;
 	    effective_error?: string;
 
 	    static createFrom(source: any = {}) {
@@ -112,7 +210,7 @@ export namespace bridge {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.configured = this.convertValues(source["configured"], gdit.ConfiguredEnvView);
-	        this.effective = this.convertValues(source["effective"], gdit.EnvView);
+	        this.effective = this.convertValues(source["effective"], EffectiveEnvView);
 	        this.effective_error = source["effective_error"];
 	    }
 
@@ -183,6 +281,38 @@ export namespace bridge {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.operation_id = source["operation_id"];
 	    }
+	}
+	export class SDKCandidateResult {
+	    channels: gdit.SDKChannel[];
+	    warnings: CandidateWarning[];
+
+	    static createFrom(source: any = {}) {
+	        return new SDKCandidateResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.channels = this.convertValues(source["channels"], gdit.SDKChannel);
+	        this.warnings = this.convertValues(source["warnings"], CandidateWarning);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class SessionSnapshot {
 	    sessions: gdit.SessionInfo[];

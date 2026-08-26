@@ -11,6 +11,7 @@ import { IssueCenter } from './IssueCenter'
 import { OperationTray } from './OperationTray'
 import { OperationButton, OperationCenter } from './OperationCenter'
 import { snapshotDiagnostics, visibleReminderCount } from '../lib/diagnostics'
+import { SessionButton, SessionPanel } from './SessionPanel'
 
 export function Layout() {
   const snapshot = useAppStore((state) => state.snapshot)
@@ -20,6 +21,7 @@ export function Layout() {
   const [maximised, setMaximised] = useState(false)
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [operationsOpen, setOperationsOpen] = useState(false)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const location = useLocation()
   const closeSidebar = () => setSidebarOpen(false)
   const toolsActive = location.pathname === '/tools' || location.pathname === '/suggest' || location.pathname === '/doctor' || location.pathname.startsWith('/resources/')
@@ -67,7 +69,8 @@ export function Layout() {
         <BrandMark />
         <strong className="titlebar-name">GoDoIt</strong><span className="titlebar-subtitle">够独特</span>
         <div className="titlebar-status">{snapshot?.current ? <>当前 <b>{snapshot.current.name}</b></> : '尚未设置当前条目'}</div>
-        <OperationButton onClick={() => setOperationsOpen(true)} />
+        <SessionButton onClick={() => { setOperationsOpen(false); setSessionsOpen(true) }} />
+        <OperationButton onClick={() => { setSessionsOpen(false); setOperationsOpen(true) }} />
         {effectiveTitlebarStyle === 'windows' && windowControls}
       </header>
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -97,6 +100,7 @@ export function Layout() {
       {sidebarOpen && <button className="sidebar-scrim" aria-label="关闭侧栏" onClick={closeSidebar} />}
       <OperationTray onOpen={() => setOperationsOpen(true)} />
       <OperationCenter open={operationsOpen} onClose={() => setOperationsOpen(false)} />
+      <SessionPanel open={sessionsOpen} onClose={() => setSessionsOpen(false)} />
       <IssueCenter open={issuesOpen} onClose={() => setIssuesOpen(false)} />
       <Modal />
       {toast && <div className="toast" role="status"><PackageOpen />{toast}</div>}

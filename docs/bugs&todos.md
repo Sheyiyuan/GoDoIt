@@ -1,6 +1,7 @@
 # GUI 问题与 TODO 设计方案
 
-> 状态：阶段 A 实现与自动测试闭环完成，阶段 B 核心与 Linux GUI 工作流部分落地，跨平台构建检查完成，实机验收待记录（2026-08-26）。本文不是架构
+> 状态：阶段 A、B 的代码与自动测试已经落地，阶段 C 发布完整性代码已经落地；三平台原生发布
+> CI 首次运行和 GUI 实机验收待记录（2026-08-26）。本文不是架构
 > 真理源；涉及产品语义和接口契约的内容以 `docs/architecture/README.md` §9.8 为准。
 >
 > 范围：完成第六阶段 GUI 的可用性、错误恢复、平台打包和验收，不新增项目管理、后台常驻、
@@ -50,14 +51,18 @@
 | operation 契约 | 已实现 | queued 初始事件、唯一终态门、终态记录、事件先到 waiter、窗口关闭等待/取消；覆盖多资产、fallback 与敏感字段 | GUI 实机视觉验收 |
 | 下载进度 | 已实现 | 按版本/文件名/来源聚合子任务；已知大小加权进度；未知大小稳定布局；顶栏入口、紧凑托盘与完整操作中心 | GUI 实机视觉验收 |
 | 顶栏即时生效 | 已实现 | `updateGUISettings` 成功后原子更新 snapshot，失败回滚 | 补齐三平台窗口控件与高 DPI 实机记录 |
+| 候选预取与分类 | 已实现 | 首屏后后台预取、向导复用、两级 channel 选择、局部来源 warning 与显式刷新 | 慢网和三平台实机验收 |
+| 环境变量编辑 | 已实现 | 全局/条目配置层编辑、派生值只读、敏感值默认掩码、Windows 大小写规则 | 三平台实机验收 |
+| 运行会话 | 已实现 | 持久登记、GUI 重启恢复、全局面板、实时事件、正常关闭与二次确认强制结束 | 多窗口和三平台实机验收 |
+| 发布完整性 | 已实现 | 统一版本、离线法律文本、三平台归档、精确白名单、摘要和双通道 GitHub Release | macOS/Windows 原生 CI 首次运行 |
 
-阶段 A 的实现与自动测试已经闭环；Linux GUI 实机视觉验收完成前仍不进入发布打包。阶段 B/C
-不因本次核心链路落地而提前宣告完成。
+阶段 A、B 的代码与自动测试已经闭环，阶段 C 的发布代码也已落地。发布包只有在对应原生 CI
+全部通过后才可对外使用；自动测试通过不替代 Linux 视觉验收及 macOS/Windows 实机验收。
 
 阶段 B 当前落地：候选预取与向导复用、固定内容区滚动、Pin 文案、配置层环境查看/编辑/删除、
 `runtime/sessions` 会话登记与恢复读取、Linux 会话启动/正常关闭/强制关闭、条目删除保护、会话
-超时二次确认及跨平台平台层编译检查已完成；仍需 macOS Apple Silicon 与 Windows x86_64 实机验收，
-以及全局运行会话面板和完整事件广播。
+超时二次确认、全局运行会话面板、完整事件广播及跨平台平台层编译检查。剩余工作是 Linux 视觉
+验收以及 macOS Apple Silicon、Windows x86_64 实机验收记录。
 
 ## 3. P0：启动与诊断语义
 
@@ -405,78 +410,48 @@ ForceStopSession(sessionID) -> SessionInfo
 
 ## 11. P1：关于页、版本和法律信息
 
-### 11.1 关于页
+### 11.1 已落地
 
-- 移除 Commit 和 Go 版本，只显示用户可理解的产品版本。
-- 增加以下入口：
-  - 项目许可证：AGPL-3.0；
-  - 第三方软件及许可证；
-  - 用户协议；
-  - 源代码仓库。
-- 许可证正文随应用离线分发，不依赖打开网络页面。
-- “用户协议”文本必须由项目负责人确认；构建脚本不能自动生成法律条款。
+- 根级 `VERSION` 是稳定版本的唯一人工维护源；开发构建版本为
+  `<VERSION>-dev.<UTC 日期>.<短 commit>`。
+- CLI `gdit version`、GUI `--build-info`、关于页和平台元数据共用 `core/buildinfo`，发布前逐项核对。
+- 发布构建使用隔离的 Wails 暂存工程和 linker flags，不临时改写已提交的 `wails.json`。
+- 关于页离线内嵌项目 AGPL-3.0 全文、第三方声明、无担保提示与源代码地址，不访问网络。
+- `THIRD_PARTY_NOTICES.txt` 从三平台 Go 运行时依赖、pnpm 生产依赖闭包和固定品牌素材元数据生成；
+  缺少、过期、未知或未进入产物的元数据均使门禁失败。
 
-### 11.2 统一版本来源
-
-参考 Half-Beat-Player 的版本注入思路，但不复制其未完成的签名流程：
-
-- tag 构建使用去掉 `v` 前缀的版本，例如 `v0.2.0 -> 0.2.0`。
-- 非 tag 构建使用可识别的开发版本，例如 `0.2.1-dev.20260826.abcdef0`。
-- 构建入口统一计算一次版本，并同时注入：
-  - Go `BuildInfo.Version`；
-  - Wails `productVersion` / 平台元数据；
-  - 前端 `VITE_APP_VERSION`；
-  - 安装包文件名。
-- commit 只用于形成开发版本和诊断构建，不在关于页单独展示。
-- 构建脚本临时修改配置时必须通过 trap 恢复；更优方案是使用构建参数，避免修改工作树。
-
-### 11.3 第三方许可证
-
-- Go 依赖和 pnpm 依赖在构建时生成固定清单，包含名称、版本、许可证和来源。
-- 缺失许可证或无法识别的依赖使发布构建失败，开发构建可给出明确警告。
-- Godot/C# 品牌资源的来源和使用说明也进入 NOTICE，不与代码许可证混淆。
-- 生成结果应可复现并纳入发布产物；是否提交生成文件在架构 review 时确定。
+项目未确认独立“用户协议”文本，因此当前不虚构该法律文件；许可和无担保说明以 AGPL-3.0 及
+第三方声明为准。
 
 ## 12. P1：平台图标与打包
 
-### 12.1 macOS 图标
+### 12.1 已落地
 
-- 当前透明头像适合 Linux/Windows 素材，不直接作为 macOS 最终应用图标。
-- 人工制作独立 `appicon-macos.png` 或 `.iconset`：
-  - 使用不透明或符合 macOS 规范的底板；
-  - 保留统一圆角轮廓和安全边距；
-  - 吉祥物主体在 Dock 小尺寸下仍可辨认；
-  - 不把圆角和阴影重复烘焙两次。
-- 生成 16、32、64、128、256、512、1024 及 Retina 对应尺寸，使用 `iconutil` 生成 `.icns`。
-- Linux PNG 与 Windows 多尺寸 ICO 继续独立生成，不能由 macOS 底板覆盖。
+- `assets/icon.png` 是三平台应用图标唯一源；Wails PNG 是字节级副本，Windows ICO 必须含
+  16/32/48/64/128/256 尺寸，macOS `.icns` 在原生构建中派生。
+- `gdit gui` 支持配套裸二进制、Windows `.exe` 和 macOS `.app/Contents/MacOS/gdit-gui`，并保留
+  `GDIT_GUI` 显式覆盖。
+- Linux、macOS、Windows 分别生成 `.tar.gz`/`.zip` 归档，每个归档都携带 CLI、GUI、`LICENSE` 和
+  `THIRD_PARTY_NOTICES.txt`；macOS bundle 内另有离线法律文本副本。
+- macOS 原生 job 执行 arm64、plist、法律资源、ad-hoc 签名及严格签名验证；Windows job 校验
+  ProductVersion。归档工具拒绝符号链接、危险路径、测试 fixture、密钥和绝对工作区路径。
 
-### 12.2 CLI 启动 macOS GUI
-
-- `gdit gui` 候选必须识别实际构建产物
-  `GoDoIt.app/Contents/MacOS/gdit-gui`，并保留显式 `GDIT_GUI` 优先级。
-- 为 `.app` 目录、内部可执行文件、同目录裸二进制和缺失文件分别增加测试。
-- `make run`、CLI 查找、文档和 Wails `name/outputfilename` 使用同一组常量或明确约定。
-
-### 12.3 签名、公证与安装包
-
-- 开发构建可以 ad-hoc 签名，但 `codesign --verify --deep --strict` 必须通过。
-- 发布构建增加 Developer ID 签名、notarytool 公证和 stapler 验证；无凭据时只产出未发布开发包。
-- macOS 产出 `.app` 和可选 DMG；Windows 产出 `.exe`/安装器；Linux 先产出裸二进制，发行包另立任务。
-- 打包流程不得把 token、证书或公证凭据写入仓库和构建日志。
+Developer ID、公证、stapling、Windows Authenticode、DMG 和安装器不在阶段 C 范围。当前产物不得
+描述为已公证或可信发布者签名。
 
 ## 13. P1：跨平台 GUI CI
 
-现有 macOS/Windows CI 只覆盖 core 和 CLI，需要补齐：
+CI 和 Release workflow 已配置：
 
-- 三平台安装前端依赖并运行 `pnpm run check`。
-- 三平台运行 `go test ./gui/...` 和 `go vet ./gui/...`。
-- Linux 安装 Wails/WebKit 构建依赖并执行原生 GUI 构建。
-- macOS Apple Silicon 执行 `.app` 构建、架构检查、Info.plist 检查和严格签名验证。
-- Windows x86_64 执行 GUI `.exe` 构建、manifest/版本信息检查和启动 smoke test。
-- 构建产物上传为 CI artifact，文件名包含统一版本和平台。
+- Go 1.25.13 最低版本与 Go 1.26 质量门禁继续保留。
+- 三平台固定 Node、pnpm、Wails 版本并使用 frozen lockfile，运行前端测试、原生 Go 测试和 vet。
+- Linux amd64、macOS arm64、Windows amd64 分别执行原生 Wails release build 和平台归档校验。
+- 中间 artifacts 只在同一次 workflow 传递；最终 job 生成 `SHA256SUMS`，复验精确四文件白名单后
+  才创建 GitHub Release。
+- `main`/手动运行发布可替换的 `dev-latest`；`v<VERSION>` 只创建不可覆盖的稳定 Release。
 
-CI 构建通过不等于实机验收。文件选择器、窗口控制、缩放、Dock/任务栏图标和关闭任务提示仍需
-Linux、macOS Apple Silicon 与 Windows x86_64 实机记录。
+工作流代码已经完成，三平台 GitHub-hosted runner 的首次实际运行仍待推送后验证。CI 构建通过也
+不等于实机验收；文件选择器、窗口控制、缩放、Dock/任务栏图标和关闭任务提示仍需三平台记录。
 
 ## 14. 测试与验收矩阵
 
@@ -496,8 +471,8 @@ Linux、macOS Apple Silicon 与 Windows x86_64 实机记录。
 | 平台 | 必测内容 |
 |---|---|
 | Linux amd64 | WebKit 渲染、文件选择器、下载进度、会话恢复/关闭、Wayland/X11、100%/150%/200% 缩放 |
-| macOS arm64 | 独立图标、Retina、窗口控制、会话恢复/关闭、`.app` 启动、签名与公证 |
-| Windows x86_64 | WebView2、窗口按钮、会话恢复/关闭、文件选择器、路径、125%/150% 缩放、安装器 |
+| macOS arm64 | 应用图标、Retina、窗口控制、会话恢复/关闭、`.app` 启动和 ad-hoc 签名验证 |
+| Windows x86_64 | WebView2、窗口按钮、会话恢复/关闭、文件选择器、路径、125%/150% 缩放和归档 |
 
 ## 15. 明确不做
 
@@ -511,19 +486,14 @@ Linux、macOS Apple Silicon 与 Windows x86_64 实机记录。
 - 不把 error 设为可忽略。
 - 不在本轮增加后台常驻、系统托盘、自动更新或深色主题。
 
-## 16. 后续 Review 决策点
+## 16. 剩余验收
 
-阶段 A 已按 §9.8 的当前契约完成实现与自动测试。以下事项仍需在对应功能进入发布验收前完成产品确认：
+阶段 A、B、C 已按架构当前契约完成代码与自动测试。后续不再变更这些产品边界，剩余工作是：
 
-1. Doctor 第一版只支持“本次关闭 warning”，持久忽略延后到稳定 `issue_id` 落地后。
-2. Pin 只是 current 的 GUI 图标和文案，不新增收藏语义。
-3. 候选版本只做会话内预取，不写磁盘缓存。
-4. 操作中心第一版不提供通用重试，只提供返回来源页面。
-5. 用户协议由项目方提供确认文本；开发阶段可先完成入口和离线文档承载机制。
-6. macOS 发布目标是否包含 Developer ID 签名、公证和 DMG；若暂无凭据，阶段 C 只能完成开发包验证。
-7. 阶段 B 已按跨 GUI 重启恢复方案新增 `~/.gdit/runtime/sessions/` 管理数据并完成核心实现；
-   实机与多窗口验收仍待补。若改为只覆盖当前窗口生命周期，可删除持久登记，但无法在重新启动 GUI
-   时显示既有会话，也不能为 CLI 删除条目提供一致的运行中保护。
+1. 补齐 Linux 最小窗口、Wayland/X11、文件选择器和 100%/150%/200% 缩放视觉记录。
+2. 在 macOS Apple Silicon 与 Windows x86_64 验证候选、环境、会话、多窗口、窗口控制和高 DPI。
+3. 推送后观察三平台原生 CI 与 Release workflow 首次实际运行，修复 runner/toolchain 差异。
+4. Developer ID、公证、stapling、Windows Authenticode、DMG 或安装器如需进入正式分发，另开安全设计。
+5. 项目方未确认独立用户协议前不创建或展示虚构条款。
 
-以上决策确认后，按“架构文档更新并 review -> 分阶段实现 -> 展示 -> 用户 review -> commit”的
-仓库流程执行。
+继续遵守“架构文档更新并 review -> 分阶段实现 -> 展示 -> 用户 review -> commit”的仓库流程。

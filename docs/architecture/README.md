@@ -1,9 +1,9 @@
 # GoDoIt 架构设计
 
 
-> 状态为 v0.2 第六阶段 Linux 基础实现完成，阶段 A GUI 可用性实现与自动测试完成，阶段 B
-> 核心与 Linux GUI 工作流部分落地；Linux 视觉验收及 macOS Apple Silicon 与 Windows x86_64
-> GUI 实机验证待完成
+> 状态为 v0.2 第六阶段 Linux 基础实现完成，阶段 A、B 的 GUI 工作流代码与自动测试已经落地；
+> 阶段 C 发布完整性代码已落地，三平台发布 CI 待首次实际运行；Linux 视觉验收及 macOS
+> Apple Silicon 与 Windows x86_64 GUI 实机验证待完成
 > 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段实现见 §9.7；第六阶段实现与验收约束见 §9.8。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
@@ -2265,6 +2265,92 @@ bridge 增加 `ListSessions / Launch / RequestStopSession / ForceStopSession`，
 
 任一会话测试都必须使用临时 gdit 根目录和可控假进程，不启动真实 Godot、不读取或终止开发者
 进程。候选测试使用固定 source fixture；环境测试不得把敏感值写入快照、错误或测试失败输出。
+
+#### 阶段 C：发布完整性与三平台 GUI 门禁（已落地，待原生 CI 验证）
+
+阶段 C 只收敛发布身份、离线法律文本、macOS 应用包身份和三平台 GUI 构建门禁，不增加自动更新、
+遥测、后台服务或新的资产管理语义。发布流程不得读取或修改用户的 gdit 根目录。
+
+**版本身份**：仓库新增根级 `VERSION` 作为发布版本的唯一人工维护源，内容是不带 `v` 的稳定
+语义版本（如 `0.2.0`）。开发构建允许显示 `dev`；tag 构建必须使用 `v<VERSION>`，不匹配立即失败。
+构建入口从同一次解析得到 `version / commit / build_date`，通过 Go linker flags 同时注入 CLI 与 GUI
+共用的 build-info 包；CLI `gdit version`、GUI 关于页和 bridge `BuildInfo` 不再各自推导版本。
+`debug.ReadBuildInfo` 只作为未注入开发构建的 commit/Go 版本补充，不能覆盖显式注入值。
+
+Wails 的 Windows version resource 与 macOS `CFBundleShortVersionString`、`CFBundleVersion` 必须由
+`VERSION` 派生；构建脚本使用结构化 JSON/plist 输入生成临时配置，不用字符串替换已提交模板。
+同一产物内 CLI、GUI、Windows resource 或 macOS bundle 任一版本不一致即发布失败。`build_date`
+使用 UTC RFC3339；设置 `SOURCE_DATE_EPOCH` 时从该值生成，避免同一次可复现构建出现不同时间。
+
+**离线法律文本**：根目录 `LICENSE` 继续保存 GoDoIt 的完整 AGPL-3.0 文本。发布构建生成
+`THIRD_PARTY_NOTICES.txt`，按实际进入 CLI/GUI 产物的 Go modules、npm packages 和随包品牌素材列出
+名称、锁定版本、许可证标识、上游地址及许可证要求保留的 notice；来源只允许 `go.mod/go.sum`、
+`pnpm-lock.yaml` 和仓库内固定元数据，不在发布构建时抓取网络内容。未知、缺失或不兼容的许可证
+必须使门禁失败，不能以空 notice 继续发布。
+
+Linux/Windows 分发目录在可执行文件同级携带 `LICENSE` 与 `THIRD_PARTY_NOTICES.txt`；macOS 把两者
+放进 `GoDoIt.app/Contents/Resources/legal/`。GUI 关于页提供“开源许可”入口，在内嵌、离线页面中
+显示版权、无担保提示、源代码地址以及两份全文；CLI 分发包可直接打开同级文件。法律页面不访问
+网络，打包测试逐字节比对根级 LICENSE，并确认断网时仍可读取。GoDoIt 不把下载的 Godot、.NET SDK
+或导出模板重新打包进自身发行物，因此这些用户下载资产不进入 GoDoIt 的第三方 notice 清单。
+
+**macOS 图标与签名边界**：`assets/icon.png` 是三平台应用图标唯一源文件；构建前派生 Wails PNG、
+macOS `.icns` 与 Windows `.ico`，CI 检查尺寸、alpha、bundle resource 和 `CFBundleIconFile` 引用，
+禁止分别手工维护内容不同的品牌图。macOS CI 对原生 arm64 `.app` 做 ad-hoc 签名并使用
+`codesign --verify --strict --verbose=2` 验证 bundle 结构，随后校验可执行架构、Info.plist 版本和
+法律资源。ad-hoc 签名只证明包结构可签，不等价于可分发身份。
+
+Developer ID Application 签名、hardened runtime、公证和 stapling 需要 Apple 凭据与独立发布密钥
+方案，不在阶段 C 的无密钥 CI 范围；在这些步骤真正接入并通过前，不把 macOS 产物标记为“已公证”。
+Windows Authenticode 同样不在本阶段范围，后续若进入正式渠道另立发布安全设计。
+
+**三平台 GUI CI**：现有 CI 保留 Go 1.25.13 最低版本与 Go 1.26 检查，并把 GUI 加入平台矩阵。
+依赖版本固定为仓库声明的 pnpm 与 Wails v2 版本；所有 runner 使用 frozen lockfile。Linux amd64、
+macOS Apple Silicon 和 Windows x86_64 各自执行前端类型检查/组件测试、`go test ./gui/...`、
+`go vet ./gui/...` 和当前平台原生 Wails release build，禁止用交叉编译替代 GUI 构建。
+
+平台产物门禁至少检查：CLI 与 GUI 都存在且版本一致、GUI 能解析内嵌前端入口、应用图标存在、
+两份法律文本可离线读取、产物不包含测试 fixture、绝对工作区路径或签名密钥。macOS runner 必须
+确认 `uname -m=arm64`，Windows runner 必须确认 `PROCESSOR_ARCHITECTURE=AMD64`。CI 的 headless
+构建与组件测试不能替代窗口、文件选择器、高 DPI、自然退出和多窗口会话的对应平台实机验收。
+
+**GitHub Release 发布**：使用稳定版与滚动开发版双通道，独立发布 workflow 在
+`main` push、`v*` tag push 和手动触发时运行。`main` 与手动触发发布可替换的 `dev-latest`
+prerelease，版本形如 `<VERSION>-dev.<UTC 日期>.<短 commit>`；tag 只发布与根级 `VERSION` 完全匹配的
+`v<VERSION>` 稳定版。tag 名不匹配、tag 对应提交不是当前检出提交或同名 Release 已存在都必须失败，
+不得删除、覆盖或移动稳定版 tag。稳定版使用 GitHub 自动生成的 release notes；开发版明确标注来源
+commit，不得写成稳定版或已公证版本。
+
+workflow 默认权限为 `contents: read`，只有汇总并发布的最终 job 使用 `contents: write`；构建、测试和
+上传中间 artifact 的 job 不得获得仓库写权限。并发组按 ref 隔离：新的 `main` 或手动开发版运行可取消
+同 ref 的旧运行，tag 运行永不自动取消。替换 `dev-latest` 时，只允许在所有平台构建和校验成功后删除
+旧 prerelease 与其可移动 tag；任何前置 job 失败都保留已有 `dev-latest`。
+
+发布流水线固定为：质量与版本门禁 -> Linux amd64、macOS arm64、Windows amd64 原生并行构建 ->
+各平台包内校验 -> 上传不可修改的中间 artifacts -> 最终 job 下载到空目录 -> 校验精确文件白名单、
+文件名版本、重复文件和意外目录 -> 按文件名字节序生成 `SHA256SUMS` -> 复算校验和 -> 创建 GitHub
+Release。最终目录只允许以下文件，缺少、重复或多出任一文件都不得发布：
+
+```text
+GoDoIt_<version>_linux_amd64.tar.gz
+GoDoIt_<version>_darwin_arm64.zip
+GoDoIt_<version>_windows_amd64.zip
+SHA256SUMS
+```
+
+每个平台归档同时包含 `gdit` CLI、GoDoIt GUI、`LICENSE` 与 `THIRD_PARTY_NOTICES.txt`；Windows
+可执行文件保留 `.exe`，macOS GUI 保留完整 `.app` bundle。归档不得包含绝对工作区路径、GitHub
+凭据、签名材料、测试 fixture 或其他平台产物。`SHA256SUMS` 只覆盖三个平台归档，使用确定性排序与
+GNU sha256sum 兼容格式。中间 artifacts 仅用于同一次 workflow 的 job 传递，不直接作为 Release
+资产；最终 GitHub Release 只上传上述白名单文件。
+
+阶段 C 已按以下固定顺序实施：
+
+1. 增加 `VERSION`、共用 build-info 包与注入测试，接通 CLI、bridge 和 Wails 平台元数据。
+2. 生成并验证离线法律资源，接入 GUI 关于页和三平台产物布局。
+3. 从统一源重建三平台图标，补 macOS bundle 资源、ad-hoc 签名与结构校验。
+4. 扩展 macOS arm64/Windows amd64 GUI 原生 CI，最后收敛 Linux 与三平台产物门禁。
+5. 增加 release workflow、归档白名单与校验和测试，验证 `dev-latest` 可替换且稳定 tag 不可变。
 
 #### 状态、错误与安全
 

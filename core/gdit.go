@@ -39,6 +39,7 @@ type Manager struct {
 	root     string
 	client   *http.Client
 	progress func(ProgressEvent)
+	session  func(SessionInfo)
 	sources  []Source
 	now      func() time.Time
 	sdkProbe func(context.Context) ([]SDKInfo, error)
@@ -70,6 +71,7 @@ func New(options Options) (*Manager, error) {
 		root:     root,
 		client:   client,
 		progress: options.Progress,
+		session:  options.Session,
 		sources:  append([]Source(nil), options.Sources...),
 		now:      time.Now,
 	}

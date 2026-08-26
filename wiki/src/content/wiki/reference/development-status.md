@@ -6,8 +6,9 @@ order: 0
 updated: 2026-08-26
 ---
 
-GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 基础实现，阶段 A 可用性实现与自动测试
-已经闭环；Linux 视觉验收以及 macOS Apple Silicon 与 Windows x86_64 的 GUI 实机验证仍待完成。
+GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 基础实现，阶段 A、B 的桌面工作流代码与
+自动测试已经落地，阶段 C 发布完整性代码也已完成。Linux 视觉验收、三平台发布 CI 首次实际运行，
+以及 macOS Apple Silicon 与 Windows x86_64 的 GUI 实机验证仍待完成。
 
 ## 当前已经实现
 
@@ -18,6 +19,8 @@ GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 基础实现，阶
 - `gdit suggest` 项目只读分析与明确授权后的建议安装
 - 导出模板安装、绑定、引用保护和孤儿清理
 - Wails v2 + React 桌面工作台，与 CLI 共享同一个 core
+- 候选后台预取与分类、配置层环境编辑、运行会话恢复与全局会话面板
+- 统一构建版本、离线许可证、三平台归档、摘要与 GitHub Release 双通道
 - Linux amd64 主支持，macOS arm64 与 Windows x86_64 验证级支持
 
 完整命令见 [命令参考](/wiki/reference/commands/)。
@@ -61,16 +64,28 @@ Wails GUI 已提供条目浏览与安装、current/launch、模板、资源、Su
 - 顶栏设置保存成功后立即更新当前窗口，失败时保留旧状态
 - 初始化失败、半成品、重试、窗口关闭等待/取消、多资产 fallback、未知大小和 waiter 释放已有自动测试
 
-### 阶段 B：桌面工作流（部分已实现）
+### 阶段 B：桌面工作流（代码与自动测试已完成）
 
-已完成候选后台预取与向导复用、全局和条目配置环境变量的查看/编辑/删除，以及
-`runtime/sessions` 持久会话登记、GUI 重启恢复读取与 Linux 启动/关闭流程。
+已完成：
 
-仍待完成：
+- 首屏后的候选后台预取、向导复用、Godot/SDK 两级分类与局部来源 warning
+- 全局和条目配置环境变量的查看、编辑、删除，派生变量只读，敏感值默认掩码
+- `runtime/sessions` 持久会话登记、GUI 重启恢复、全局会话面板与实时事件
+- 同条目多开、正常关闭、超时后二次确认强制结束，以及运行中条目删除保护
+- 固定内容区滚动、Pin 语义和最小窗口布局约束
 
-- 顶栏“运行中 N”、跨条目全局会话面板和 `gdit:session` 实时事件
-- 候选按 Godot channel 与 SDK major/minor 完整分类，以及空结果、部分来源失败和 fallback warning 独立状态
-- Linux 最小窗口、高 DPI、Wayland/X11 与 macOS/Windows GUI 实机验收记录
-- 跨平台 GUI CI、签名、公证、安装器和统一版本命名等发布门禁
+Linux 最小窗口、高 DPI、Wayland/X11，以及 macOS/Windows 的候选、环境、会话和多窗口流程仍需
+实机验收记录。
+
+### 阶段 C：发布完整性（代码已完成）
+
+- 根级 `VERSION` 统一 CLI、GUI 和平台元数据；`gdit version` 可查看完整构建身份
+- 关于页离线显示 AGPL-3.0、第三方软件声明、无担保提示与源代码地址
+- Linux amd64、macOS arm64、Windows amd64 原生归档都携带 CLI、GUI 和法律文本
+- `SHA256SUMS`、归档路径、文件白名单、绝对工作区路径和签名材料均有发布门禁
+- `main`/手动运行更新 `dev-latest`，`v<VERSION>` 创建不可覆盖的稳定 Release
+
+macOS 当前只做 ad-hoc 签名，尚未公证；Windows 尚无 Authenticode。三平台 GitHub-hosted runner
+的首次实际运行仍待推送后确认。下载步骤见 [安装 GoDoIt 发行包](/wiki/how-to/install-godoit/)。
 
 最终需求以仓库的 `docs/requirements.md` 为准，技术设计以 `docs/architecture/README.md` 为唯一真理源。

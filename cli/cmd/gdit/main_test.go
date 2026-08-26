@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -159,6 +160,13 @@ func TestInstallParsesEntryFlagsAfterName(t *testing.T) {
 	}
 	if request.Name != "work" || request.Version != "4.5.2" || request.Edition != "dotnet" || request.SDKVersion != "8.0.410" || request.SetCurrent == nil || *request.SetCurrent {
 		t.Fatalf("unexpected request: %+v", request)
+	}
+}
+
+func TestVersionUsesSharedBuildInfo(t *testing.T) {
+	stdout, stderr, code := runCommand(t, fakeManager{}, "version")
+	if code != 0 || stderr != "" || !strings.HasPrefix(stdout, "gdit dev\n") || !strings.Contains(stdout, "\ngo go") {
+		t.Fatalf("unexpected version output: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
@@ -360,6 +368,14 @@ func TestFindGUIExecutableUsesConfiguredPath(t *testing.T) {
 	got, err := findGUIExecutable()
 	if err != nil || got != path {
 		t.Fatalf("unexpected configured GUI path: got=%q err=%v", got, err)
+	}
+}
+
+func TestGUIExecutableCandidatesIncludeReleaseAppBundle(t *testing.T) {
+	directory := filepath.Join("release", "GoDoIt_0.2.0_darwin_arm64")
+	want := filepath.Join(directory, "GoDoIt.app", "Contents", "MacOS", "gdit-gui")
+	if candidates := guiExecutableCandidates(directory); !slices.Contains(candidates, want) {
+		t.Fatalf("macOS 发布应用候选缺少 %q：%v", want, candidates)
 	}
 }
 

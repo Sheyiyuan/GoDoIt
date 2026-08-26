@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	gdit "github.com/Sheyiyuan/GoDoIt/core"
+	"github.com/Sheyiyuan/GoDoIt/core/buildinfo"
 )
 
 type managerAPI interface {
@@ -155,7 +156,7 @@ func guiExecutableCandidates(directory string) []string {
 	return []string{
 		filepath.Join(directory, "gdit-gui"),
 		filepath.Join(directory, "gdit-gui.exe"),
-		filepath.Join(directory, "gdit-gui.app", "Contents", "MacOS", "gdit-gui"),
+		filepath.Join(directory, "GoDoIt.app", "Contents", "MacOS", "gdit-gui"),
 	}
 }
 
@@ -197,6 +198,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		writeVersion(stdout)
+		return 0
+	}
 	root, err := gdit.DefaultRoot()
 	if err != nil {
 		writeError(stderr, err)
@@ -256,6 +261,12 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return runSetup(ctx, root, args[1:], stdout, stderr, manager)
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout, stderr, manager)
+	case "version", "--version":
+		if len(args) != 1 {
+			return usage(stderr, "gdit version")
+		}
+		writeVersion(stdout)
+		return 0
 	case "help", "h", "-h", "--help":
 		writeUsage(stdout)
 		return 0
@@ -1537,7 +1548,7 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (handled, 
 
 func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "usage: gdit <command> [options]")
-	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), gui, engine, sdk, template, suggest, env (e), autoremove, source (s), available (a), setup (st), doctor")
+	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), gui, engine, sdk, template, suggest, env (e), autoremove, source (s), available (a), setup (st), doctor, version")
 	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current] [--template]")
 	fmt.Fprintln(writer, "  engine [list] | install [options] <version>... | remove [-y] <version>")
 	fmt.Fprintln(writer, "  sdk [list] | available | install <version> | remove [-y] <version>")
@@ -1548,4 +1559,17 @@ func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  run [<name>|-d] [-- <engine args>]")
 	fmt.Fprintln(writer, "  gui [arguments]")
 	fmt.Fprintln(writer, "  doctor [--network] [--verbose]")
+	fmt.Fprintln(writer, "  version")
+}
+
+func writeVersion(writer io.Writer) {
+	info := buildinfo.Read()
+	fmt.Fprintf(writer, "gdit %s\n", info.Version)
+	if info.Commit != "" {
+		fmt.Fprintf(writer, "commit %s\n", info.Commit)
+	}
+	if info.BuildDate != "" {
+		fmt.Fprintf(writer, "built %s\n", info.BuildDate)
+	}
+	fmt.Fprintf(writer, "go %s\n", info.GoVersion)
 }

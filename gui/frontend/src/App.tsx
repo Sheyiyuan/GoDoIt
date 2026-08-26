@@ -4,6 +4,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { BrandMark } from './components/BrandMark'
 import { subscribeProgress } from './lib/operations'
+import { subscribeSessions } from './lib/sessions'
 import { AboutPage } from './pages/AboutPage'
 import { DoctorPage } from './pages/DoctorPage'
 import { InstancePage } from './pages/InstancePage'
@@ -23,6 +24,8 @@ export default function App() {
   const load = useAppStore((state) => state.load)
   const handleProgress = useAppStore((state) => state.handleProgress)
   const prefetchCandidates = useAppStore((state) => state.prefetchCandidates)
+  const handleSession = useAppStore((state) => state.handleSession)
+  const refreshSessions = useAppStore((state) => state.refreshSessions)
 
   useEffect(() => {
     const unsubscribe = subscribeProgress(handleProgress)
@@ -33,6 +36,14 @@ export default function App() {
   useEffect(() => {
     if (snapshot) void prefetchCandidates()
   }, [prefetchCandidates, snapshot])
+
+  useEffect(() => {
+    if (!snapshot) return
+    const unsubscribe = subscribeSessions(handleSession)
+    void refreshSessions()
+    const timer = window.setInterval(() => void refreshSessions(), 2500)
+    return () => { unsubscribe(); window.clearInterval(timer) }
+  }, [handleSession, refreshSessions, snapshot])
 
   if (loading && !snapshot) return <div className="boot-screen"><BrandMark large /><LoaderCircle className="spin" /><span>正在读取 GoDoIt</span></div>
   if (error && !snapshot) return <div className="boot-screen error"><BrandMark large /><strong>无法载入工作台</strong>{bootstrapRoot && <code>{bootstrapRoot}</code>}<p>{error}</p><button className="button primary" type="button" onClick={() => void load()}><RefreshCw />重试</button></div>

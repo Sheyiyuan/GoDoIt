@@ -2,7 +2,9 @@ package gdit
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,5 +91,78 @@ func TestStartManagedProcessCanBeStoppedWithoutContextCoupling(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("fixture process did not stop")
 	case <-waited:
+	}
+}
+
+func TestManagedSessionLifecycleEmitsEventsAndProtectsInstance(t *testing.T) {
+	target, err := platform.CurrentTarget()
+	if err != nil {
+		t.Skipf("current platform is not supported: %v", err)
+	}
+	fixture, err := exec.LookPath("yes")
+	if err != nil {
+		t.Skip("yes fixture process is unavailable")
+	}
+	fixtureData, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	events := make(chan SessionInfo, 8)
+	manager, err := New(Options{RootDir: root, Session: func(info SessionInfo) { events <- info }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	const engineID = "4.5.2-standard"
+	const launcher = "fixture-engine"
+	payload := filepath.Join(root, "engines", engineID, "payload")
+	if err := os.MkdirAll(payload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(payload, launcher), fixtureData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "id = \"" + engineID + "\"\nversion = \"4.5.2\"\nedition = \"standard\"\ntarget_os = \"" + target.OS + "\"\ntarget_arch = \"" + target.Arch + "\"\nsource = \"fixture\"\nchecksum_algorithm = \"sha256\"\nchecksum = \"" + strings.Repeat("a", 64) + "\"\nlauncher = \"" + launcher + "\"\ninstalled_at = \"2026-08-26T00:00:00Z\"\n"
+	if err := os.WriteFile(filepath.Join(root, "engines", engineID, "install.toml"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeRawInstance(t, root, "session-fixture", "4.5.2", "standard", "")
+
+	started, err := manager.LaunchSession(context.Background(), "session-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event := waitSessionEvent(t, events, SessionRunning); event.SessionID != started.SessionID {
+		t.Fatalf("running event session = %q, want %q", event.SessionID, started.SessionID)
+	}
+	if _, err := manager.RemoveInstance(context.Background(), "session-fixture"); !errors.Is(err, ErrInstanceRunning) {
+		t.Fatalf("running session did not protect instance: %v", err)
+	}
+	stopping, err := manager.RequestStopSession(context.Background(), started.SessionID)
+	if err != nil || stopping.Status != SessionStopping {
+		t.Fatalf("request stop result = %+v err=%v", stopping, err)
+	}
+	waitSessionEvent(t, events, SessionStopping)
+	waitSessionEvent(t, events, SessionExited)
+	items, err := manager.Sessions(context.Background())
+	if err != nil || len(items) != 0 {
+		t.Fatalf("exited session was not cleaned: %+v err=%v", items, err)
+	}
+}
+
+func waitSessionEvent(t *testing.T, events <-chan SessionInfo, status SessionStatus) SessionInfo {
+	t.Helper()
+	select {
+	case event := <-events:
+		if event.Status != status {
+			t.Fatalf("session event status = %q, want %q", event.Status, status)
+		}
+		return event
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for session status %q", status)
+		return SessionInfo{}
 	}
 }

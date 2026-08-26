@@ -10,16 +10,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	gdit "github.com/Sheyiyuan/GoDoIt/core"
+	"github.com/Sheyiyuan/GoDoIt/core/buildinfo"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const progressEventName = "gdit:progress"
+const (
+	progressEventName = "gdit:progress"
+	sessionEventName  = "gdit:session"
+)
 
 type managerFactory func(progress func(gdit.ProgressEvent)) (*gdit.Manager, error)
 type eventEmitter func(string, any)
@@ -43,7 +46,7 @@ func ResolveRoot() (string, error) { return gdit.DefaultRoot() }
 func NewApp(root string) *App {
 	app := &App{root: root, ctx: context.Background(), operations: make(map[string]context.CancelFunc)}
 	app.newManager = func(progress func(gdit.ProgressEvent)) (*gdit.Manager, error) {
-		return gdit.New(gdit.Options{RootDir: root, Progress: progress})
+		return gdit.New(gdit.Options{RootDir: root, Progress: progress, Session: app.emitSession})
 	}
 	app.promptClose = func(ctx context.Context) (bool, error) {
 		choice, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
@@ -240,26 +243,53 @@ func (a *App) GetEnvironment(name string) (EnvironmentDetails, error) {
 		details.EffectiveError = effectiveErr.Error()
 		return details, nil
 	}
-	details.Effective = effective
+	details.Effective = effectiveEnvironmentView(effective)
 	return details, nil
 }
 
-// ListAvailableVersions 在后台读取引擎候选，不登记为 GUI 操作任务。
-func (a *App) ListAvailableVersions(source string) ([]gdit.EngineChannel, error) {
-	manager, err := a.newManager(nil)
-	if err != nil {
-		return nil, err
+func effectiveEnvironmentView(view gdit.EnvView) EffectiveEnvView {
+	result := EffectiveEnvView{Vars: make([]EffectiveEnvVar, 0, len(view.Vars)), Args: append([]string(nil), view.Args...)}
+	for _, variable := range view.Vars {
+		result.Vars = append(result.Vars, EffectiveEnvVar{Key: variable.Key, Value: variable.Value, Origin: variable.Origin, Sensitive: gdit.IsSensitiveEnvironmentKey(variable.Key)})
 	}
-	return manager.Available(a.ctx, source)
+	return result
 }
 
-// ListAvailableSDKs 在后台读取 SDK 候选，不登记为 GUI 操作任务。
-func (a *App) ListAvailableSDKs() ([]gdit.SDKChannel, error) {
-	manager, err := a.newManager(nil)
+// ListAvailableVersions 在后台读取引擎候选与局部失败，不登记为 GUI 操作任务。
+func (a *App) ListAvailableVersions(source string) (EngineCandidateResult, error) {
+	warnings, progress := candidateWarningCollector()
+	manager, err := a.newManager(progress)
 	if err != nil {
-		return nil, err
+		return EngineCandidateResult{}, err
 	}
-	return manager.AvailableSDKs(a.ctx)
+	channels, err := manager.Available(a.ctx, source)
+	if err != nil {
+		return EngineCandidateResult{}, err
+	}
+	return EngineCandidateResult{Channels: channels, Warnings: *warnings}, nil
+}
+
+// ListAvailableSDKs 在后台读取 SDK 候选与局部失败，不登记为 GUI 操作任务。
+func (a *App) ListAvailableSDKs() (SDKCandidateResult, error) {
+	warnings, progress := candidateWarningCollector()
+	manager, err := a.newManager(progress)
+	if err != nil {
+		return SDKCandidateResult{}, err
+	}
+	channels, err := manager.AvailableSDKs(a.ctx)
+	if err != nil {
+		return SDKCandidateResult{}, err
+	}
+	return SDKCandidateResult{Channels: channels, Warnings: *warnings}, nil
+}
+
+func candidateWarningCollector() (*[]CandidateWarning, func(gdit.ProgressEvent)) {
+	warnings := make([]CandidateWarning, 0)
+	return &warnings, func(event gdit.ProgressEvent) {
+		if event.Stage == "warning" && strings.TrimSpace(event.Message) != "" {
+			warnings = append(warnings, CandidateWarning{Source: event.Source, Message: event.Message})
+		}
+	}
 }
 
 // GetDoctor 启动可取消的诊断；network 明确控制是否探测来源。
@@ -537,6 +567,12 @@ func (a *App) emitEvent(event ProgressEnvelope) {
 	}
 }
 
+func (a *App) emitSession(session gdit.SessionInfo) {
+	if a.emit != nil {
+		a.emit(sessionEventName, session)
+	}
+}
+
 func newOperationID() (string, error) {
 	var bytes [16]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
@@ -546,22 +582,8 @@ func newOperationID() (string, error) {
 }
 
 func readBuildInfo() BuildInfo {
-	result := BuildInfo{Version: "dev"}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		result.GoVersion = info.GoVersion
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
-			result.Version = info.Main.Version
-		}
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" {
-				result.Commit = setting.Value
-				if len(result.Commit) > 12 {
-					result.Commit = result.Commit[:12]
-				}
-			}
-		}
-	}
-	return result
+	info := buildinfo.Read()
+	return BuildInfo{Version: info.Version, GoVersion: info.GoVersion, Commit: info.Commit, BuildDate: info.BuildDate}
 }
 
 // IconHandler 只提供 /instance-icons/<uuid>.png，不暴露 gdit 根目录其他文件。

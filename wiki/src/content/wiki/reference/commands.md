@@ -3,7 +3,7 @@ title: 命令参考
 description: gdit 命令、参数和行为约定的速查表。
 section: reference
 order: 1
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
 命令简写为 `install`→`i`、`list`→`l`、`source`→`s`、`available`→`a`、`default`→`d`、`run`→`r`、`remove`→`rm`、`setup`→`st`、`env`→`e`。
@@ -31,6 +31,7 @@ updated: 2026-08-25
 | 启动当前条目 | `gdit run [-- 参数]` / `-d` | 等价裸 `godot` |
 | 启动指定条目 | `gdit run <name> [-- 参数]` | 不改变 current |
 | 启动桌面 GUI | `gdit gui [参数]` | 启动配套的 `gdit-gui`，参数和退出码原样透传；可用 `GDIT_GUI` 指定路径 |
+| 查看构建身份 | `gdit version` / `gdit --version` | 显示版本、commit、构建时间与 Go 版本 |
 
 仓库开发入口为 `make run`（构建并启动 GUI）；需要启动 CLI 时使用 `make run-cli <command>`。
 

@@ -46,6 +46,9 @@ func (m *Manager) Sessions(ctx context.Context) ([]SessionInfo, error) {
 			if removeErr := session.Remove(m.root, record.SessionID); removeErr != nil {
 				return nil, localIOError("remove stale session", removeErr)
 			}
+			info := publicSession(record)
+			info.Status = SessionLost
+			m.notifySession(info)
 			continue
 		}
 		result = append(result, publicSession(record))
@@ -99,8 +102,10 @@ func (m *Manager) LaunchSession(ctx context.Context, name string) (SessionInfo, 
 		_ = process.Wait()
 		return SessionInfo{}, fmt.Errorf("register Godot session: %w", err)
 	}
+	info := publicSession(record)
+	m.notifySession(info)
 	go m.waitSession(process, record)
-	return publicSession(record), nil
+	return info, nil
 }
 
 // RequestStopSession 请求指定会话正常退出。
@@ -144,7 +149,10 @@ func (m *Manager) stopSession(ctx context.Context, id string, force bool) (Sessi
 			if removeErr := session.Remove(m.root, id); removeErr != nil {
 				return SessionInfo{}, localIOError("remove stale session", removeErr)
 			}
-			return publicSession(record), nil
+			info := publicSession(record)
+			info.Status = SessionLost
+			m.notifySession(info)
+			return info, nil
 		}
 		if force {
 			if err := platform.ForceStop(record.PID); err != nil {
@@ -157,7 +165,9 @@ func (m *Manager) stopSession(ctx context.Context, id string, force bool) (Sessi
 		if err := session.Write(m.root, record); err != nil {
 			return SessionInfo{}, localIOError("update session status", err)
 		}
-		return publicSession(record), nil
+		info := publicSession(record)
+		m.notifySession(info)
+		return info, nil
 	}
 	return SessionInfo{}, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 }
@@ -169,7 +179,18 @@ func (m *Manager) waitSession(process *platform.ManagedProcess, record session.R
 		return
 	}
 	defer guard.Close()
-	_ = session.Remove(m.root, record.SessionID)
+	if err := session.Remove(m.root, record.SessionID); err != nil {
+		return
+	}
+	info := publicSession(record)
+	info.Status = SessionExited
+	m.notifySession(info)
+}
+
+func (m *Manager) notifySession(info SessionInfo) {
+	if m.session != nil {
+		m.session(info)
+	}
 }
 
 func (m *Manager) hasRunningSession(ctx context.Context, name string) (bool, error) {

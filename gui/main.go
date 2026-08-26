@@ -2,8 +2,11 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
+	"os"
 
+	"github.com/Sheyiyuan/GoDoIt/core/buildinfo"
 	"github.com/Sheyiyuan/GoDoIt/gui/bridge"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -15,6 +18,13 @@ import (
 var assets embed.FS
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--build-info" {
+		if err := json.NewEncoder(os.Stdout).Encode(buildinfo.Read()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	root, err := bridge.ResolveRoot()
 	if err != nil {
 		panic(fmt.Sprintf("解析 gdit 根目录失败：%v", err))

@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// Options 配置 Manager 的用户目录、网络客户端和进度回调。
+// Options 配置 Manager 的用户目录、网络客户端、进度回调和会话回调。
 type Options struct {
 	RootDir    string
 	HTTPClient *http.Client
 	Progress   func(ProgressEvent)
+	Session    func(SessionInfo)
 	Sources    []Source
 	SDKProbe   func(context.Context) ([]SDKInfo, error)
 }

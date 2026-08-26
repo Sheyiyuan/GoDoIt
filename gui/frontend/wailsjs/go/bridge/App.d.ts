@@ -37,9 +37,9 @@ export function LaunchSession(arg1:string):Promise<gdit.SessionInfo>;
 
 export function ListAssets():Promise<bridge.AssetSnapshot>;
 
-export function ListAvailableSDKs():Promise<Array<gdit.SDKChannel>>;
+export function ListAvailableSDKs():Promise<bridge.SDKCandidateResult>;
 
-export function ListAvailableVersions(arg1:string):Promise<Array<gdit.EngineChannel>>;
+export function ListAvailableVersions(arg1:string):Promise<bridge.EngineCandidateResult>;
 
 export function ListInstances():Promise<Array<gdit.InstanceInfo>>;
 

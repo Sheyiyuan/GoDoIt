@@ -3,7 +3,7 @@ title: 目录布局与配置
 description: ~/.gdit 下的文件、全局配置和实例条目格式。
 section: reference
 order: 2
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
 ## 目录布局
@@ -21,10 +21,15 @@ GoDoIt 的所有状态默认在用户级目录 `~/.gdit/` 中。Windows 默认�
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
 ├── templates/     # 已验证的导出模板资产
+├── runtime/
+│   ├── .lock      # 运行会话跨进程锁
+│   └── sessions/  # GUI 启动的 Godot 会话登记
 └── tmp/           # 下载/解压临时目录（中断残留自动清理）
 ```
 
 GoDoIt 不把配置写入项目目录或系统目录，也不修改 shell 配置、系统 PATH 和系统 dotnet。
+`runtime/sessions/` 只保存会话 ID、条目/引擎 ID、PID、进程身份和启动时间，不保存项目路径、
+完整命令行、环境变量或可执行文件路径。关闭 GUI 不会关闭仍在运行的 Godot。
 
 ## config.toml
 

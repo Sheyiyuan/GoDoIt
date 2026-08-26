@@ -39,9 +39,10 @@ export function DoctorPage() {
   return (
     <div className="page doctor-page">
       <header className="page-header"><div><p className="eyebrow">环境诊断</p><h1>Doctor</h1></div><div className="header-actions"><label className="toggle"><input type="checkbox" checked={network} onChange={(event) => setNetwork(event.target.checked)} /><span /><Network />检查来源可达性</label><button className="button primary" type="button" disabled={running} onClick={() => void run()}>{running ? <LoaderCircle className="spin" /> : <RefreshCw />}{running ? '检查中' : '重新检查'}</button></div></header>
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      <section className="doctor-summary"><div className="summary-mark"><Stethoscope /></div><div><strong>{report?.error_count ? '发现需要处理的问题' : report?.warn_count ? '可以使用，有少量提醒' : '环境状态正常'}</strong><small>{report?.root}</small></div><dl><div><dt>正常</dt><dd>{report?.ok_count || 0}</dd></div><div><dt>警告</dt><dd>{report?.warn_count || 0}</dd></div><div><dt>错误</dt><dd>{report?.error_count || 0}</dd></div></dl></section>
-      <section className="doctor-groups" aria-label="诊断项">{issueGroups.map((group) => {
+      <div className="page-body">
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        <section className="doctor-summary"><div className="summary-mark"><Stethoscope /></div><div><strong>{report?.error_count ? '发现需要处理的问题' : report?.warn_count ? '可以使用，有少量提醒' : '环境状态正常'}</strong><small>{report?.root}</small></div><dl><div><dt>正常</dt><dd>{report?.ok_count || 0}</dd></div><div><dt>警告</dt><dd>{report?.warn_count || 0}</dd></div><div><dt>错误</dt><dd>{report?.error_count || 0}</dd></div></dl></section>
+        <section className="doctor-groups" aria-label="诊断项">{issueGroups.map((group) => {
         const items = issues.filter((item) => item.group === group && !dismissed[item.id])
         if (items.length === 0) return null
         const collapsed = group === 'integration' && !integrationOpen
@@ -51,7 +52,8 @@ export function DoctorPage() {
         </div>
       })}
       <div className="doctor-group doctor-group-ok"><button className="doctor-group-heading" type="button" onClick={() => setNormalOpen((value) => !value)}><span><CheckCircle2 /><strong>正常</strong><i>{normal.length}</i></span>{normalOpen ? <ChevronUp /> : <ChevronDown />}</button>{normalOpen && <div className="check-list">{normal.map((item, index) => <article key={`${item.code}-${index}`} className="check-row check-ok"><StatusBadge status="ok" /><div><strong>{item.message}</strong>{item.suggest && <p>{item.suggest}</p>}</div></article>)}</div>}</div>
-      </section>
+        </section>
+      </div>
     </div>
   )
 }

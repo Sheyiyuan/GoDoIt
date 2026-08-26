@@ -4,7 +4,7 @@ import type { ProgressEnvelope } from '../types'
 
 const running = (progress: ProgressEnvelope['progress']): ProgressEnvelope => ({ operation_id: 'fixture', operation: 'install-entry', status: 'running', timestamp: '2026-08-26T01:00:00Z', progress })
 
-beforeEach(() => useAppStore.setState({ operations: {}, dismissedWarnings: {} }))
+beforeEach(() => useAppStore.setState({ operations: {}, dismissedWarnings: {}, sessions: [], sessionRevision: 0, terminalSessions: {} }))
 
 describe('operation store contract', () => {
   it('merges multiple assets and fallback sources without overwriting subtasks', () => {
@@ -49,5 +49,19 @@ describe('operation store contract', () => {
     handle({ operation_id: 'fixture', operation: 'doctor', status: 'complete', timestamp: '2026-08-26T01:00:00Z', result: { ok_count: 2, warn_count: 0, error_count: 0, root: '/private/root' } })
     useAppStore.getState().clearOperation('fixture')
     expect(useAppStore.getState().operations).toEqual({})
+  })
+})
+
+describe('session store contract', () => {
+  it('upserts active sessions and removes terminal sessions', () => {
+    const handle = useAppStore.getState().handleSession
+    const running = { session_id: 'session-1', instance_id: 'instance-1', instance_name: 'studio', engine_id: '4.5.2-standard', pid: 42, started_at: '2026-08-26T01:00:00Z', status: 'running' as const }
+    handle(running)
+    handle({ ...running, status: 'stopping' })
+
+    expect(useAppStore.getState().sessions).toEqual([{ ...running, status: 'stopping' }])
+    handle({ ...running, status: 'exited' })
+    handle(running)
+    expect(useAppStore.getState().sessions).toEqual([])
   })
 })

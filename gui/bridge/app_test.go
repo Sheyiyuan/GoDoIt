@@ -191,6 +191,42 @@ func TestBeforeCloseWaitsOrCancelsActiveOperations(t *testing.T) {
 	}
 }
 
+func TestCandidateWarningCollectorKeepsOnlyNonEmptyWarnings(t *testing.T) {
+	warnings, collect := candidateWarningCollector()
+	collect(gdit.ProgressEvent{Stage: "resolve", Message: "not a warning"})
+	collect(gdit.ProgressEvent{Stage: "warning", Source: "godothub", Message: "fixture unavailable"})
+	collect(gdit.ProgressEvent{Stage: "warning", Source: "github", Message: "  "})
+
+	if len(*warnings) != 1 || (*warnings)[0].Source != "godothub" || (*warnings)[0].Message != "fixture unavailable" {
+		t.Fatalf("unexpected candidate warnings: %+v", *warnings)
+	}
+}
+
+func TestEffectiveEnvironmentViewMarksSensitiveKeys(t *testing.T) {
+	view := effectiveEnvironmentView(gdit.EnvView{Vars: []gdit.EnvVar{
+		{Key: "PUBLIC_VALUE", Value: "visible", Origin: "global"},
+		{Key: "SERVICE_TOKEN", Value: "secret", Origin: "instance"},
+	}})
+	if len(view.Vars) != 2 || view.Vars[0].Sensitive || !view.Vars[1].Sensitive {
+		t.Fatalf("unexpected effective environment sensitivity: %+v", view.Vars)
+	}
+}
+
+func TestSessionEventUsesStableNameAndPayload(t *testing.T) {
+	app := NewApp(t.TempDir())
+	want := gdit.SessionInfo{SessionID: "fixture", InstanceName: "studio", Status: gdit.SessionRunning}
+	var eventName string
+	var payload any
+	app.emit = func(name string, data any) {
+		eventName = name
+		payload = data
+	}
+	app.emitSession(want)
+	if eventName != sessionEventName || payload != want {
+		t.Fatalf("unexpected session event: name=%q payload=%+v", eventName, payload)
+	}
+}
+
 func TestIconHandlerServesOnlyCanonicalInstancePNG(t *testing.T) {
 	root := t.TempDir()
 	app := NewApp(root)
