@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -52,27 +51,21 @@ func RequestStop(pid int) error {
 	if pid <= 0 {
 		return errors.New("invalid process id")
 	}
-	target := struct {
-		pid   uint32
-		found bool
-	}{pid: uint32(pid)}
-	callback := windows.NewCallback(func(hwnd windows.HWND, parameter uintptr) uintptr {
-		state := (*struct {
-			pid   uint32
-			found bool
-		})(unsafe.Pointer(parameter))
+	targetPID := uint32(pid)
+	found := false
+	callback := windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
 		var windowPID uint32
-		if _, err := windows.GetWindowThreadProcessId(hwnd, &windowPID); err == nil && windowPID == state.pid {
-			state.found = true
+		if _, err := windows.GetWindowThreadProcessId(hwnd, &windowPID); err == nil && windowPID == targetPID {
+			found = true
 			_, _, _ = sendMessageW.Call(uintptr(hwnd), wmClose, 0, 0)
 			return 0
 		}
 		return 1
 	})
-	if err := windows.EnumWindows(callback, unsafe.Pointer(&target)); err != nil {
+	if err := windows.EnumWindows(callback, nil); err != nil {
 		return err
 	}
-	if !target.found {
+	if !found {
 		return errors.New("target process has no top-level window")
 	}
 	return nil
