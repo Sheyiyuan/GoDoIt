@@ -13,13 +13,19 @@ export function Cancel(arg1:string):Promise<boolean>;
 
 export function DetachTemplate(arg1:string):Promise<bridge.OperationStart>;
 
+export function ForceStopSession(arg1:string):Promise<gdit.SessionInfo>;
+
 export function GetDefault():Promise<gdit.InstanceInfo>;
 
 export function GetDoctor(arg1:boolean):Promise<bridge.OperationStart>;
 
+export function GetEnvironment(arg1:string):Promise<bridge.EnvironmentDetails>;
+
 export function GetGUISettings():Promise<gdit.GUISettings>;
 
 export function GetInstanceDetails(arg1:string):Promise<bridge.InstanceDetails>;
+
+export function GetRoot():Promise<string>;
 
 export function InstallEntry(arg1:gdit.InstallEntryRequest):Promise<bridge.OperationStart>;
 
@@ -27,13 +33,17 @@ export function InstallSuggestion(arg1:gdit.InstallSuggestionRequest):Promise<br
 
 export function Launch(arg1:string):Promise<void>;
 
+export function LaunchSession(arg1:string):Promise<gdit.SessionInfo>;
+
 export function ListAssets():Promise<bridge.AssetSnapshot>;
 
-export function ListAvailableSDKs():Promise<bridge.OperationStart>;
+export function ListAvailableSDKs():Promise<Array<gdit.SDKChannel>>;
 
-export function ListAvailableVersions(arg1:string):Promise<bridge.OperationStart>;
+export function ListAvailableVersions(arg1:string):Promise<Array<gdit.EngineChannel>>;
 
 export function ListInstances():Promise<Array<gdit.InstanceInfo>>;
+
+export function ListSessions():Promise<bridge.SessionSnapshot>;
 
 export function ListSources():Promise<Array<gdit.SourceInfo>>;
 
@@ -42,6 +52,8 @@ export function PickIconFile():Promise<string>;
 export function PickProjectDirectory():Promise<string>;
 
 export function RemoveInstance(arg1:string):Promise<bridge.OperationStart>;
+
+export function RequestStopSession(arg1:string):Promise<gdit.SessionInfo>;
 
 export function SetDefault(arg1:string):Promise<void>;
 

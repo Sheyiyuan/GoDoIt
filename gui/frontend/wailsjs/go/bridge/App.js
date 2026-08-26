@@ -22,6 +22,10 @@ export function DetachTemplate(arg1) {
   return window['go']['bridge']['App']['DetachTemplate'](arg1);
 }
 
+export function ForceStopSession(arg1) {
+  return window['go']['bridge']['App']['ForceStopSession'](arg1);
+}
+
 export function GetDefault() {
   return window['go']['bridge']['App']['GetDefault']();
 }
@@ -30,12 +34,20 @@ export function GetDoctor(arg1) {
   return window['go']['bridge']['App']['GetDoctor'](arg1);
 }
 
+export function GetEnvironment(arg1) {
+  return window['go']['bridge']['App']['GetEnvironment'](arg1);
+}
+
 export function GetGUISettings() {
   return window['go']['bridge']['App']['GetGUISettings']();
 }
 
 export function GetInstanceDetails(arg1) {
   return window['go']['bridge']['App']['GetInstanceDetails'](arg1);
+}
+
+export function GetRoot() {
+  return window['go']['bridge']['App']['GetRoot']();
 }
 
 export function InstallEntry(arg1) {
@@ -48,6 +60,10 @@ export function InstallSuggestion(arg1) {
 
 export function Launch(arg1) {
   return window['go']['bridge']['App']['Launch'](arg1);
+}
+
+export function LaunchSession(arg1) {
+  return window['go']['bridge']['App']['LaunchSession'](arg1);
 }
 
 export function ListAssets() {
@@ -66,6 +82,10 @@ export function ListInstances() {
   return window['go']['bridge']['App']['ListInstances']();
 }
 
+export function ListSessions() {
+  return window['go']['bridge']['App']['ListSessions']();
+}
+
 export function ListSources() {
   return window['go']['bridge']['App']['ListSources']();
 }
@@ -80,6 +100,10 @@ export function PickProjectDirectory() {
 
 export function RemoveInstance(arg1) {
   return window['go']['bridge']['App']['RemoveInstance'](arg1);
+}
+
+export function RequestStopSession(arg1) {
+  return window['go']['bridge']['App']['RequestStopSession'](arg1);
 }
 
 export function SetDefault(arg1) {

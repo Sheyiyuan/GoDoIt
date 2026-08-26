@@ -1,6 +1,6 @@
 # GoDoIt 命令参考（操作 ↔ 指令）
 
-> 状态：v0.2 第五阶段 CLI 实现完成；第六阶段 Linux GUI 实现完成
+> 状态：v0.2 第五阶段 CLI 实现完成；第六阶段 Linux 基础 GUI 实现完成，阶段 A 可用性实现与自动测试完成
 > 本文档从用户操作视角列出所有指令与输出约定；设计语义以
 > [`docs/architecture/README.md`](architecture/README.md) 为唯一真理源。
 > 本文记录截至第五阶段的 CLI 命令面；第六阶段 GUI 不改变这些命令契约。第三阶段起不保留第二阶段命令兼容层。

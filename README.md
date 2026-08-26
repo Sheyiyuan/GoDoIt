@@ -13,9 +13,10 @@
 
 GoDoIt（够独特）是一个简单易用的 Godot 引擎启动器与版本管理器。它把引擎和 .NET SDK 当作可校验、可复用的资产，把启动配置保存为 instances 条目，让 `godot` 在任意目录都启动当前条目。
 
-当前 `v0.2` 第六阶段已经完成 Linux 实现：除 `suggest`、导出模板、`doctor` 与三平台
-适配层外，现已提供共享同一 core 的 Wails v2 + React GUI。macOS Apple Silicon 与
-Windows x86_64 的 GUI 实机验证仍待完成。
+当前 `v0.2` 第六阶段已经完成 Linux 基础实现，阶段 A GUI 可用性实现与自动测试已经闭环。
+阶段 B 已部分落地候选后台预取与复用、配置层环境变量编辑，以及可跨 GUI 重启恢复的运行会话；
+全局会话面板与实时事件、候选完整分类、Linux GUI 视觉验收和 macOS Apple Silicon /
+Windows x86_64 GUI 实机验证仍待完成。
 
 ## 为什么用 GoDoIt
 
@@ -98,7 +99,7 @@ GoDoIt 的用户级数据默认放在 `~/.gdit/`，可用绝对路径环境变�
 ```bash
 make check       # 格式检查、测试和 go vet
 make test-race   # 竞态检测
-make build       # 构建 bin/gdit 与 gui/build/bin/gdit-gui
+make build       # 构建 bin/gdit 与 gui/build/bin（macOS 为 GoDoIt.app）
 make build-gui   # 只构建 Wails GUI；Linux WebKit 标签可用 WAILS_BUILD_TAGS 覆盖
 make run         # 构建并启动 GUI
 make run-cli list # 构建并启动 CLI；命令参数直接跟在 run-cli 后
@@ -112,6 +113,7 @@ GOOS=darwin GOARCH=arm64 go build -trimpath -o /tmp/gdit-darwin-arm64 ./cli/cmd/
 - [命令参考](./docs/commands.md)
 - [架构与阶段边界](./docs/architecture/README.md)
 - [需求与 MVP 验收标准](./docs/requirements.md)
+- [GUI 问题与 TODO 进度](./docs/bugs&todos.md)
 - [Wiki 源码](./wiki/README.md)
 
 ## License

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Download, Eye, EyeOff, MoreHorizontal, PackageCheck, Play, RefreshCw, Settings2, Star, Trash2, Unlink } from 'lucide-react'
+import { Download, Eye, EyeOff, MoreHorizontal, PackageCheck, Pin, Play, RefreshCw, Settings2, Trash2, Unlink } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { IconAvatar } from '../components/IconAvatar'
 import { IconPicker } from '../components/IconPicker'
@@ -7,7 +7,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { api } from '../lib/api'
 import { runOperation } from '../lib/operations'
 import { useAppStore } from '../store/app'
-import type { IconStrategy, InstanceDetails } from '../types'
+import type { IconStrategy, InstanceDetails, SessionInfo } from '../types'
 import { formatBytes, readableError } from '../utils'
 
 export function InstancePage() {
@@ -21,6 +21,7 @@ export function InstancePage() {
   const [error, setError] = useState('')
   const [revealed, setRevealed] = useState<Set<string>>(new Set())
   const [showIcons, setShowIcons] = useState(false)
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
 
   useEffect(() => {
     if (name || !snapshot) return
@@ -36,6 +37,15 @@ export function InstancePage() {
     api.GetInstanceDetails(name).then((result) => active && setDetails(result)).catch((reason) => active && setError(readableError(reason)))
     return () => { active = false }
   }, [name, snapshot])
+
+  useEffect(() => {
+    if (!name) return
+    let active = true
+    const refresh = () => { void api.ListSessions().then((result) => active && setSessions(result.sessions.filter((item) => item.instance_name === name))) }
+    refresh()
+    const timer = window.setInterval(refresh, 2500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [name])
 
   const instance = details?.instance || snapshot?.instances.find((item) => item.name === name)
   const template = useMemo(() => details?.templates.find((item) => item.id === instance?.template), [details, instance])
@@ -69,11 +79,40 @@ export function InstancePage() {
     await execute(api.SetInstanceIcon(instance.name, { icon: instance.icon, background: background || undefined }), background ? '图标背景色已更新' : '图标背景已恢复透明')
   }
 
+  const closeSession = async (sessionId: string) => {
+    try {
+      const updated = await api.RequestStopSession(sessionId)
+      setSessions((items) => items.map((item) => item.session_id === updated.session_id ? updated : item))
+      await new Promise((resolve) => window.setTimeout(resolve, 2000))
+      const latest = await api.ListSessions()
+      if (!latest.sessions.some((item) => item.session_id === sessionId)) {
+        setSessions((items) => items.filter((item) => item.session_id !== sessionId))
+        return
+      }
+      openModal({
+        title: '会话仍在运行',
+        body: '正常关闭请求暂未完成。强制结束会立即终止该 Godot 进程，未保存内容可能丢失。',
+        confirmLabel: '强制结束',
+        tone: 'danger',
+        onConfirm: async () => {
+          try {
+            await api.ForceStopSession(sessionId)
+            setSessions((items) => items.filter((item) => item.session_id !== sessionId))
+          } catch (reason) {
+            setError(readableError(reason))
+          }
+        },
+      })
+    } catch (reason) {
+      setError(readableError(reason))
+    }
+  }
+
   return (
     <div className="page instance-page">
       <header className="page-header instance-header">
         <div className="instance-title"><IconAvatar instance={instance} size="large" /><div><h1>{instance.name}</h1><p><span className="tag">{instance.current ? '当前' : '可用'}</span>{instance.icon_missing && <span className="tag warning">图标已回退</span>}Godot {instance.engine.replace(`-${instance.edition}`, '')} · {instance.edition === 'dotnet' ? '.NET edition' : 'standard edition'}</p></div></div>
-        <div className="header-actions"><button className="button primary" type="button" onClick={async () => { try { await api.Launch(instance.name); notify(`已启动 ${instance.name}`) } catch (reason) { setError(readableError(reason)) } }}><Play />启动 Godot</button><button className="icon-button bordered" type="button" aria-label="条目操作" title="条目操作" onClick={() => setShowIcons((shown) => !shown)}><MoreHorizontal /></button></div>
+        <div className="header-actions"><button className="button primary" type="button" onClick={async () => { try { const session = await api.LaunchSession(instance.name); setSessions((items) => [...items, session]); notify(`已启动 ${instance.name}`) } catch (reason) { setError(readableError(reason)) } }}><Play />{sessions.length ? '再启动一个' : '启动 Godot'}</button><button className="icon-button bordered" type="button" aria-label="条目操作" title="条目操作" onClick={() => setShowIcons((shown) => !shown)}><MoreHorizontal /></button></div>
         {showIcons && <div className="floating-picker"><strong>条目图标</strong><IconPicker value={instance.icon} background={instance.icon_background} onChange={(value) => void setIcon(value)} onBackgroundChange={(value) => void setIconBackground(value)} onPickCustom={() => void setIcon('custom')} /></div>}
       </header>
       {error && <div className="inline-error" role="alert">{error}<button type="button" onClick={() => setError('')}>关闭</button></div>}
@@ -87,6 +126,8 @@ export function InstancePage() {
           <div><dt>状态</dt><dd><StatusBadge status={instance.template_missing ? 'warn' : 'ok'} label={instance.template_missing ? '导出资源缺失' : '可启动'} /></dd></div>
         </dl>
       </section>
+
+      {sessions.length > 0 && <section className="section-block session-section" aria-labelledby="session-title"><div className="section-heading"><div><h2 id="session-title">运行会话</h2><p>{sessions.length} 个由 GoDoIt GUI 启动的会话</p></div></div><div className="session-list">{sessions.map((session) => <div className="session-row" key={session.session_id}><span><strong>{session.instance_name}</strong><small>PID {session.pid} · {session.status}</small></span><button className="button secondary" type="button" disabled={session.status === 'stopping'} onClick={() => void closeSession(session.session_id)}>关闭</button></div>)}</div></section>}
 
       <section className="section-block" aria-labelledby="dependency-title">
         <div className="section-heading"><div><h2 id="dependency-title">条目资源</h2><p>导出模板</p></div></div>
@@ -108,7 +149,7 @@ export function InstancePage() {
       <section className="action-footer">
         <div><Settings2 /><span><strong>条目操作</strong><small>配置变更会立即写入当前 gdit 根目录</small></span></div>
         <div>
-          {!instance.current && <button className="button secondary" type="button" onClick={async () => { try { await api.SetDefault(instance.name); await load(); notify(`${instance.name} 已设为当前`) } catch (reason) { setError(readableError(reason)) } }}><Star />设为当前</button>}
+          {!instance.current && <button className="button secondary" type="button" onClick={async () => { try { await api.SetDefault(instance.name); await load(); notify(`${instance.name} 已设为当前`) } catch (reason) { setError(readableError(reason)) } }}><Pin />设为当前</button>}
           <button className="button danger-quiet" type="button" disabled={instance.current} title={instance.current ? '当前条目不能卸载' : '卸载条目'} onClick={() => openModal({ title: `卸载 ${instance.name}`, body: '条目文件和自定义图标将被删除。引擎、SDK 与模板会保留为孤儿资产，稍后可复查清理。', confirmLabel: '卸载条目', tone: 'danger', onConfirm: async () => { if (await execute(api.RemoveInstance(instance.name), `${instance.name} 已卸载`)) navigate('/instances') } })}><Trash2 />卸载</button>
         </div>
       </section>

@@ -3,11 +3,11 @@ title: 开发状态与阶段范围
 description: 当前已经实现的能力，以及后续阶段边界。
 section: reference
 order: 0
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
-GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 实现，macOS Apple Silicon 与
-Windows x86_64 的 GUI 实机验证仍待完成。
+GoDoIt 当前处于 `v0.2`。第六阶段 GUI 已完成 Linux 基础实现，阶段 A 可用性实现与自动测试
+已经闭环；Linux 视觉验收以及 macOS Apple Silicon 与 Windows x86_64 的 GUI 实机验证仍待完成。
 
 ## 当前已经实现
 
@@ -48,5 +48,29 @@ Wails GUI 已提供条目浏览与安装、current/launch、模板、资源、Su
 关于页面。GUI 直接调用同一个 core，不复制安装、环境、SDK、来源或项目分析规则。Linux
 原生构建已通过；macOS Apple Silicon 与 Windows x86_64 仍需完成窗口、文件选择器、路径显示、
 键盘导航与高 DPI 布局的实机验收。
+
+### 阶段 A：GUI 可用性修补（实现与自动测试已完成）
+
+已完成：
+
+- GUI 首次启动通过 core 初始化标准 gdit 目录，不自动创建 shim 或 current
+- Bootstrap 与 Doctor 问题按故障、需要注意、可选命令行集成分组，可查看详情并在本次会话关闭 warning
+- operation 注册后立即产生 queued 事件，保证唯一终态并释放 waiter
+- 顶栏提供任务入口和紧凑托盘；完整操作中心聚合多资产与 fallback 下载，展示已知或未知大小进度、
+  安全结果摘要、完成时间和失败来源入口
+- 顶栏设置保存成功后立即更新当前窗口，失败时保留旧状态
+- 初始化失败、半成品、重试、窗口关闭等待/取消、多资产 fallback、未知大小和 waiter 释放已有自动测试
+
+### 阶段 B：桌面工作流（部分已实现）
+
+已完成候选后台预取与向导复用、全局和条目配置环境变量的查看/编辑/删除，以及
+`runtime/sessions` 持久会话登记、GUI 重启恢复读取与 Linux 启动/关闭流程。
+
+仍待完成：
+
+- 顶栏“运行中 N”、跨条目全局会话面板和 `gdit:session` 实时事件
+- 候选按 Godot channel 与 SDK major/minor 完整分类，以及空结果、部分来源失败和 fallback warning 独立状态
+- Linux 最小窗口、高 DPI、Wayland/X11 与 macOS/Windows GUI 实机验收记录
+- 跨平台 GUI CI、签名、公证、安装器和统一版本命名等发布门禁
 
 最终需求以仓库的 `docs/requirements.md` 为准，技术设计以 `docs/architecture/README.md` 为唯一真理源。

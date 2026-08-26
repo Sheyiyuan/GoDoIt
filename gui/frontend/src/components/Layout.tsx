@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CircleHelp, Maximize2, Menu, Minimize2, Minus, PackageOpen, Plus, Settings, Wrench, X } from 'lucide-react'
+import { CircleHelp, Maximize2, Menu, Minimize2, Minus, PackageOpen, Plus, RefreshCw, Settings, Wrench, X } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAppStore } from '../store/app'
 import { closeWindow, isWindowMaximised, minimiseWindow, resolveTitlebarStyle, toggleMaximiseWindow } from '../lib/window'
@@ -7,7 +7,10 @@ import type { TitlebarStyle } from '../types'
 import { BrandMark } from './BrandMark'
 import { IconAvatar } from './IconAvatar'
 import { Modal } from './Modal'
+import { IssueCenter } from './IssueCenter'
 import { OperationTray } from './OperationTray'
+import { OperationButton, OperationCenter } from './OperationCenter'
+import { snapshotDiagnostics, visibleReminderCount } from '../lib/diagnostics'
 
 export function Layout() {
   const snapshot = useAppStore((state) => state.snapshot)
@@ -15,9 +18,15 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [effectiveTitlebarStyle, setEffectiveTitlebarStyle] = useState<Exclude<TitlebarStyle, 'auto'>>('mac')
   const [maximised, setMaximised] = useState(false)
+  const [issuesOpen, setIssuesOpen] = useState(false)
+  const [operationsOpen, setOperationsOpen] = useState(false)
   const location = useLocation()
   const closeSidebar = () => setSidebarOpen(false)
   const toolsActive = location.pathname === '/tools' || location.pathname === '/suggest' || location.pathname === '/doctor' || location.pathname.startsWith('/resources/')
+  const dismissedWarnings = useAppStore((state) => state.dismissedWarnings)
+  const diagnostics = snapshotDiagnostics(snapshot)
+  const reminderCount = visibleReminderCount(diagnostics, dismissedWarnings)
+  const firstIssue = diagnostics.find((item) => item.group !== 'integration' && !dismissedWarnings[item.id])
 
   useEffect(() => {
     let active = true
@@ -58,6 +67,7 @@ export function Layout() {
         <BrandMark />
         <strong className="titlebar-name">GoDoIt</strong><span className="titlebar-subtitle">够独特</span>
         <div className="titlebar-status">{snapshot?.current ? <>当前 <b>{snapshot.current.name}</b></> : '尚未设置当前条目'}</div>
+        <OperationButton onClick={() => setOperationsOpen(true)} />
         {effectiveTitlebarStyle === 'windows' && windowControls}
       </header>
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -75,14 +85,19 @@ export function Layout() {
           </div>
         </nav>
         <nav className="bottom-nav" aria-label="应用">
-          <NavLink to="/tools" className={toolsActive ? 'active' : undefined} aria-current={toolsActive ? 'page' : undefined} onClick={closeSidebar}><Wrench />工具{Boolean(snapshot?.doctor.error_count || snapshot?.doctor.warn_count) && <i>{(snapshot?.doctor.error_count || 0) + (snapshot?.doctor.warn_count || 0)}</i>}</NavLink>
+          <NavLink to="/tools" className={toolsActive ? 'active' : undefined} aria-current={toolsActive ? 'page' : undefined} onClick={closeSidebar}><Wrench />工具{reminderCount > 0 && <i>{reminderCount}</i>}</NavLink>
           <NavLink to="/settings" onClick={closeSidebar}><Settings />设置</NavLink>
           <NavLink to="/about" onClick={closeSidebar}><CircleHelp />关于</NavLink>
         </nav>
       </aside>
-      <main className="main-content"><Outlet /></main>
+      <main className="main-content">
+        {reminderCount > 0 && firstIssue && <div className={`bootstrap-issues bootstrap-issues-${firstIssue.group}`} role="status"><strong>发现 {reminderCount} 项问题</strong><span>{firstIssue.message}</span><button className="button text" type="button" onClick={() => setIssuesOpen(true)}>查看详情</button><button className="icon-button" type="button" aria-label="重新读取" title="重新读取" onClick={() => void useAppStore.getState().load()}><RefreshCw /></button></div>}
+        <Outlet />
+      </main>
       {sidebarOpen && <button className="sidebar-scrim" aria-label="关闭侧栏" onClick={closeSidebar} />}
-      <OperationTray />
+      <OperationTray onOpen={() => setOperationsOpen(true)} />
+      <OperationCenter open={operationsOpen} onClose={() => setOperationsOpen(false)} />
+      <IssueCenter open={issuesOpen} onClose={() => setIssuesOpen(false)} />
       <Modal />
       {toast && <div className="toast" role="status"><PackageOpen />{toast}</div>}
     </div>

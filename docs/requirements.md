@@ -2,7 +2,8 @@
 
 > GoDoIt ｜ CLI/包名：gdit  
 > Go! Do It! 不等戈多，自己动手。  
-> 状态：v0.2 第六阶段 Linux 实现完成，macOS Apple Silicon 与 Windows x86_64 GUI 实机验证待完成
+> 状态：v0.2 第六阶段 Linux 基础实现完成；阶段 A GUI 可用性实现与自动测试完成，GUI 实机视觉
+> 验收待完成；macOS Apple Silicon 与 Windows x86_64 GUI 实机验证待完成
 > 第五阶段验收见 docs/architecture/README.md §9.7；第六阶段实现与验收约束见 §9.8。
 > 平台扩展：Windows x86_64 为验证级支持；发布须通过 Windows 原生验收与 macOS Apple Silicon CI。
 

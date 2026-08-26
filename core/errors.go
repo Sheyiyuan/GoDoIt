@@ -37,6 +37,10 @@ var (
 	ErrNoCompatibleSDK = errors.New("compatible SDK not installed")
 	// ErrAssetInUse 表示资产仍被一个或多个条目引用。
 	ErrAssetInUse = errors.New("asset is referenced by an instance")
+	// ErrInstanceRunning 表示条目仍有由 GUI 启动的运行会话。
+	ErrInstanceRunning = errors.New("instance has running GUI sessions")
+	// ErrSessionNotFound 表示运行会话不存在或已失效。
+	ErrSessionNotFound = errors.New("session not found")
 )
 
 // SourceUnavailableError 标记来源的连接或资产暂时不可用，允许继续 fallback。

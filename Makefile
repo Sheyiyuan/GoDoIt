@@ -11,13 +11,23 @@ CLI_PACKAGE := ./cli/cmd/gdit
 GO_PACKAGES := ./core/... ./cli/... ./gui/...
 GUI_DIR := gui
 GUI_FRONTEND_DIR := $(GUI_DIR)/frontend
+# macOS 上 wails 将应用打包为 .app 包，可执行文件位于 Contents/MacOS 下；
+# Linux/Windows 为裸二进制（Windows 追加 .exe 后缀）
+UNAME_S := $(shell uname -s)
+ifeq ($(OS),Windows_NT)
+GUI_BINARY := $(GUI_DIR)/build/bin/gdit-gui.exe
+else ifeq ($(UNAME_S),Darwin)
+GUI_APP_BUNDLE := $(GUI_DIR)/build/bin/GoDoIt.app
+GUI_BINARY := $(GUI_APP_BUNDLE)/Contents/MacOS/gdit-gui
+else
 GUI_BINARY := $(GUI_DIR)/build/bin/gdit-gui
+endif
 WAILS_BUILD_TAGS ?= webkit2_41
 WAILS_TAG_FLAGS := $(if $(strip $(WAILS_BUILD_TAGS)),-tags "$(WAILS_BUILD_TAGS)")
 HERO_SVG := assets/readme/hero.svg
 HERO_PNG := assets/readme/hero.png
 HERO_PNG_WIDTH := 2400
-APP_MASCOT_PNG := assets/mascot.png
+APP_ICON_PNG := assets/icon.png
 GUI_APP_ICON := $(GUI_DIR)/build/appicon.png
 GUI_WINDOWS_ICON := $(GUI_DIR)/build/windows/icon.ico
 
@@ -91,20 +101,19 @@ png:
 	$(INKSCAPE) $(HERO_SVG) --export-filename=$(HERO_PNG) --export-width=$(HERO_PNG_WIDTH)
 
 appicon:
-	@task_icon_dir="$$(mktemp -d)"; \
-		trap 'rm -rf "$$task_icon_dir"' EXIT; \
-		$(MAGICK) $(APP_MASCOT_PNG) -crop 460x460+115+15 +repage -trim -resize '820x820' -background none -gravity center -extent 1024x1024 +repage $(GUI_APP_ICON); \
-		$(MAGICK) $(GUI_APP_ICON) -background none -define icon:auto-resize=256,128,64,48,32,16 $(GUI_WINDOWS_ICON)
+	$(MAGICK) $(APP_ICON_PNG) $(GUI_APP_ICON); \
+		$(MAGICK) $(APP_ICON_PNG) -background none -define icon:auto-resize=256,128,64,48,32,16 $(GUI_WINDOWS_ICON)
 
 clean:
-	rm -f $(BINARY) $(GUI_BINARY)
+	rm -f $(BINARY)
+	rm -rf $(GUI_APP_BUNDLE) $(GUI_BINARY)
 	@rmdir $(BIN_DIR) 2>/dev/null || true
 
 help:
 	@printf '%s\n' \
 		'build      构建 CLI 与 Wails GUI（默认目标）' \
 		'build-cli  构建 CLI 到 bin/gdit' \
-		'build-gui  构建 GUI 到 gui/build/bin/gdit-gui' \
+		'build-gui  构建 GUI 到 gui/build/bin（macOS 为 GoDoIt.app）' \
 		'run        构建并运行 GUI，可用 ARGS 传入参数' \
 		'run-cli    构建并运行 CLI，参数直接跟在后面，如 make run-cli list' \
 		'frontend-check  运行前端类型检查与组件测试' \
@@ -116,6 +125,6 @@ help:
 		'vet        静态检查所有 Go 包' \
 		'check      运行前端检查、格式检查、测试和静态检查' \
 		'png        使用 Inkscape 将 README hero 渲染为 2400px 宽 PNG' \
-		'appicon    从现有吉祥物头像生成 GUI PNG/ICO 图标' \
+		'appicon    从统一品牌图生成 GUI PNG/ICO 图标' \
 		'all        检查后构建 CLI 与 GUI' \
 		'clean      删除构建产物'

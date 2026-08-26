@@ -19,8 +19,10 @@ export default function App() {
   const snapshot = useAppStore((state) => state.snapshot)
   const loading = useAppStore((state) => state.loading)
   const error = useAppStore((state) => state.error)
+  const bootstrapRoot = useAppStore((state) => state.bootstrapRoot)
   const load = useAppStore((state) => state.load)
   const handleProgress = useAppStore((state) => state.handleProgress)
+  const prefetchCandidates = useAppStore((state) => state.prefetchCandidates)
 
   useEffect(() => {
     const unsubscribe = subscribeProgress(handleProgress)
@@ -28,8 +30,12 @@ export default function App() {
     return unsubscribe
   }, [handleProgress, load])
 
+  useEffect(() => {
+    if (snapshot) void prefetchCandidates()
+  }, [prefetchCandidates, snapshot])
+
   if (loading && !snapshot) return <div className="boot-screen"><BrandMark large /><LoaderCircle className="spin" /><span>正在读取 GoDoIt</span></div>
-  if (error && !snapshot) return <div className="boot-screen error"><BrandMark large /><strong>无法载入工作台</strong><p>{error}</p><button className="button primary" type="button" onClick={() => void load()}><RefreshCw />重试</button></div>
+  if (error && !snapshot) return <div className="boot-screen error"><BrandMark large /><strong>无法载入工作台</strong>{bootstrapRoot && <code>{bootstrapRoot}</code>}<p>{error}</p><button className="button primary" type="button" onClick={() => void load()}><RefreshCw />重试</button></div>
 
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

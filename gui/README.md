@@ -24,4 +24,5 @@ cd frontend && pnpm run dev
   `https://godotengine.org/assets/press/icon_color.svg`
 - `frontend/public/brand/csharp.svg` 使用项目确认的 C# 品牌 SVG。
 - `frontend/public/logo.svg` 是项目 `assets/logo.svg` 的 GUI 副本；`frontend/public/mascot.png`
-  是项目吉祥物资源。
+  是条目吉祥物资源；`frontend/public/favicon.png`、`build/appicon.png` 与 Windows ICO
+  均由统一品牌图 `assets/icon.png` 生成。

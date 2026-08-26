@@ -2,6 +2,7 @@ import type {
   AppSnapshot,
   AssetSnapshot,
   DoctorReport,
+  EnvironmentDetails,
   EngineChannel,
   InstallEntryRequest,
   InstallSuggestionRequest,
@@ -11,6 +12,7 @@ import type {
   SDKChannel,
   SetInstanceIconRequest,
   SourceInfo,
+  SessionInfo,
   GUISettings,
 } from '../types'
 
@@ -89,12 +91,13 @@ function demoOperation<T>(operation: string, result: () => T): Promise<Operation
 
 export const api = {
   Bootstrap: () => backend() ? call<AppSnapshot>('Bootstrap') : Promise.resolve(clone(demoSnapshot)),
+  GetRoot: () => backend() ? call<string>('GetRoot') : Promise.resolve(demoSnapshot.root),
   GetGUISettings: () => backend() ? call<GUISettings>('GetGUISettings') : Promise.resolve(clone(demoSnapshot.gui)),
   SetGUISettings: (settings: GUISettings) => backend() ? call<void>('SetGUISettings', settings) : Promise.resolve().then(() => { demoSnapshot.gui = clone(settings) }),
   ListAssets: () => backend() ? call<AssetSnapshot>('ListAssets') : Promise.resolve(clone(demoSnapshot.assets)),
-  GetInstanceDetails: (name: string) => backend() ? call<InstanceDetails>('GetInstanceDetails', name) : Promise.resolve({ instance: clone(demoSnapshot.instances.find((item) => item.name === name)!), env: { vars: name === 'studio-csharp' ? [{ key: 'DOTNET_ROOT', value: '/home/demo/.gdit/sdks/8.0.410', origin: 'derived' }, { key: 'PATH', value: '/home/demo/.gdit/sdks/8.0.410:…', origin: 'derived' }] : [], args: [] }, templates: clone(demoSnapshot.assets.templates) }),
-  ListAvailableVersions: (source = '') => backend() ? call<OperationStart>('ListAvailableVersions', source) : demoOperation('available-versions', () => demoVersionsForSource(source)),
-  ListAvailableSDKs: () => backend() ? call<OperationStart>('ListAvailableSDKs') : demoOperation('available-sdks', () => [{ major_minor: '10.0', phase: 'active', release_type: 'lts', versions: ['10.0.103'] }, { major_minor: '8.0', phase: 'maintenance', release_type: 'lts', versions: ['8.0.410', '8.0.408'] }] satisfies SDKChannel[]),
+  GetInstanceDetails: (name: string) => backend() ? call<InstanceDetails>('GetInstanceDetails', name) : Promise.resolve({ instance: clone(demoSnapshot.instances.find((item) => item.name === name)!), env: { vars: name === 'studio-csharp' ? [{ key: 'DOTNET_ROOT', value: '/home/demo/.gdit/sdks/8.0.410', origin: 'derived' }, { key: 'PATH', value: '/home/demo/.gdit/sdks/8.0.410:…', origin: 'derived' }] : [], args: [] }, configured_env: { vars: [] }, templates: clone(demoSnapshot.assets.templates) }),
+  ListAvailableVersions: (source = '') => backend() ? call<EngineChannel[]>('ListAvailableVersions', source) : Promise.resolve(demoVersionsForSource(source)),
+  ListAvailableSDKs: () => backend() ? call<SDKChannel[]>('ListAvailableSDKs') : Promise.resolve([{ major_minor: '10.0', phase: 'active', release_type: 'lts', versions: ['10.0.103'] }, { major_minor: '8.0', phase: 'maintenance', release_type: 'lts', versions: ['8.0.410', '8.0.408'] }]),
   GetDoctor: (network: boolean) => backend() ? call<OperationStart>('GetDoctor', network) : demoOperation('doctor', () => clone(demoSnapshot.doctor)),
   Suggest: (projectDir: string) => backend() ? call<OperationStart>('Suggest', projectDir) : demoOperation('suggest', () => ({ project_dir: projectDir, engine_series: '4.5', edition: 'dotnet', sdk_strategy: 'managed', sdk_version: '8.0.410', sdk_channel: '8.0', installable: true, evidence: [{ kind: 'project-feature', path: `${projectDir}/project.godot`, value: '4.5, C#' }, { kind: 'global-json', path: `${projectDir}/global.json`, value: '8.0.410' }, { kind: 'target-framework', path: `${projectDir}/Game.csproj`, value: 'net8.0' }], diagnostics: [{ level: 'warning', code: 'missing-csproj-peer', path: `${projectDir}/project.godot`, message: '建议确认所有 C# 项目文件位于同一目录' }] } satisfies ProjectSuggestion)),
   InstallEntry: (request: InstallEntryRequest) => backend() ? call<OperationStart>('InstallEntry', request) : demoOperation('install-entry', () => {
@@ -110,6 +113,11 @@ export const api = {
   AttachTemplate: (name: string, source = '') => backend() ? call<OperationStart>('AttachTemplate', name, source) : demoOperation('attach-template', () => ({ instance: { name }, template: { id: demoSnapshot.instances.find((item) => item.name === name)?.engine }, installed: true })),
   DetachTemplate: (name: string) => backend() ? call<OperationStart>('DetachTemplate', name) : demoOperation('detach-template', () => ({ instance: { name } })),
   SetInstanceIcon: (name: string, request: SetInstanceIconRequest) => backend() ? call<OperationStart>('SetInstanceIcon', name, request) : demoOperation('set-instance-icon', () => { const item = demoSnapshot.instances.find((entry) => entry.name === name)!; item.icon = request.icon; item.resolved_icon = request.icon === 'default' ? (item.edition === 'dotnet' ? 'csharp' : 'godot') : request.icon as InstanceDetails['instance']['resolved_icon']; item.icon_background = request.background || ''; return clone(item) }),
+  GetEnvironment: (name: string) => backend() ? call<EnvironmentDetails>('GetEnvironment', name) : Promise.resolve({ configured: { vars: [] }, effective: { vars: [], args: [] } }),
+  ListSessions: () => backend() ? call<{ sessions: SessionInfo[] }>('ListSessions') : Promise.resolve({ sessions: [] }),
+  LaunchSession: (name: string) => backend() ? call<SessionInfo>('LaunchSession', name) : Promise.resolve({ session_id: crypto.randomUUID(), instance_id: '', instance_name: name, engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'running' as const }),
+  RequestStopSession: (id: string) => backend() ? call<SessionInfo>('RequestStopSession', id) : Promise.resolve({ session_id: id, instance_id: '', instance_name: '', engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'stopping' as const }),
+  ForceStopSession: (id: string) => backend() ? call<SessionInfo>('ForceStopSession', id) : Promise.resolve({ session_id: id, instance_id: '', instance_name: '', engine_id: '', pid: 0, started_at: new Date().toISOString(), status: 'exited' as const }),
   SetDefault: async (name: string) => { if (backend()) return call<void>('SetDefault', name); demoSnapshot.instances.forEach((item) => { item.current = item.name === name }); demoSnapshot.current = demoSnapshot.instances.find((item) => item.name === name) },
   SetEnvVar: (scope: string, key: string, value: string) => backend() ? call<void>('SetEnvVar', scope, key, value) : Promise.resolve(),
   UnsetEnvVar: (scope: string, key: string) => backend() ? call<void>('UnsetEnvVar', scope, key) : Promise.resolve(),

@@ -52,6 +52,9 @@ const networkProbeTimeout = 5 * time.Second
 // sensitiveKeyPattern 匹配需要掩码值的敏感键名特征（token/secret/password/key）。
 var sensitiveKeyPattern = regexp.MustCompile(`(?i)(token|secret|password|key)`)
 
+// IsSensitiveEnvironmentKey 报告环境变量键名是否需要默认掩码。
+func IsSensitiveEnvironmentKey(key string) bool { return sensitiveKeyPattern.MatchString(key) }
+
 type doctorCheck func(code string, status CheckStatus, message, suggest string, details ...string)
 
 // Doctor 执行纯只读环境诊断：不获取全局修改锁、不写任何文件、不重建状态、
@@ -515,7 +518,7 @@ func (m *Manager) checkEnvironment(ctx context.Context, check doctorCheck) {
 
 // maskSensitive 对键名匹配敏感特征的变量值掩码（--verbose 也不放开）。
 func maskSensitive(key, value string) string {
-	if sensitiveKeyPattern.MatchString(key) {
+	if IsSensitiveEnvironmentKey(key) {
 		return "******"
 	}
 	return value

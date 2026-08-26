@@ -28,10 +28,23 @@ type AssetSnapshot struct {
 
 // InstanceDetails 是条目详情页一次读取所需的结果。
 type InstanceDetails struct {
-	Instance  gdit.InstanceInfo   `json:"instance"`
-	Env       gdit.EnvView        `json:"env"`
-	EnvError  string              `json:"env_error,omitempty"`
-	Templates []gdit.TemplateInfo `json:"templates"`
+	Instance   gdit.InstanceInfo      `json:"instance"`
+	Env        gdit.EnvView           `json:"env"`
+	Configured gdit.ConfiguredEnvView `json:"configured_env"`
+	EnvError   string                 `json:"env_error,omitempty"`
+	Templates  []gdit.TemplateInfo    `json:"templates"`
+}
+
+// EnvironmentDetails 是环境编辑器消费的配置层与有效值快照。
+type EnvironmentDetails struct {
+	Configured     gdit.ConfiguredEnvView `json:"configured"`
+	Effective      gdit.EnvView           `json:"effective"`
+	EffectiveError string                 `json:"effective_error,omitempty"`
+}
+
+// SessionSnapshot 是 GUI 运行会话列表返回值。
+type SessionSnapshot struct {
+	Sessions []gdit.SessionInfo `json:"sessions"`
 }
 
 // BuildInfo 描述当前 GUI 构建。

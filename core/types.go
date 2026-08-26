@@ -3,6 +3,7 @@ package gdit
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // Options 配置 Manager 的用户目录、网络客户端和进度回调。
@@ -219,6 +220,57 @@ type EnvVar struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
 	Origin string `json:"origin"`
+}
+
+// EnvScope 是用户环境变量的配置作用域。
+type EnvScope string
+
+const (
+	// EnvScopeGlobal 表示 config.toml 的通用环境变量。
+	EnvScopeGlobal EnvScope = "global"
+	// EnvScopePlatform 表示 config.toml 当前平台小节的环境变量。
+	EnvScopePlatform EnvScope = "platform"
+	// EnvScopeInstance 表示 instances 条目的环境变量。
+	EnvScopeInstance EnvScope = "instance"
+)
+
+// ConfiguredEnvVar 描述一条未合并的用户配置环境变量。
+type ConfiguredEnvVar struct {
+	Key       string   `json:"key"`
+	Value     string   `json:"value"`
+	Scope     EnvScope `json:"scope"`
+	Editable  bool     `json:"editable"`
+	Sensitive bool     `json:"sensitive"`
+}
+
+// ConfiguredEnvView 描述全局、平台和条目配置层的环境变量。
+type ConfiguredEnvView struct {
+	Vars []ConfiguredEnvVar `json:"vars"`
+}
+
+// SessionStatus 描述 GUI 启动会话的状态。
+type SessionStatus string
+
+const (
+	// SessionRunning 表示进程仍在运行。
+	SessionRunning SessionStatus = "running"
+	// SessionStopping 表示已请求正常退出。
+	SessionStopping SessionStatus = "stopping"
+	// SessionExited 表示进程已退出。
+	SessionExited SessionStatus = "exited"
+	// SessionLost 表示进程身份失配或无法恢复。
+	SessionLost SessionStatus = "lost"
+)
+
+// SessionInfo 描述一个由 GUI 启动并登记的 Godot 会话。
+type SessionInfo struct {
+	SessionID    string        `json:"session_id"`
+	InstanceID   string        `json:"instance_id"`
+	InstanceName string        `json:"instance_name"`
+	EngineID     string        `json:"engine_id"`
+	PID          int           `json:"pid"`
+	StartedAt    time.Time     `json:"started_at"`
+	Status       SessionStatus `json:"status"`
 }
 
 // EnvView 描述 gdit 为目标条目增加或覆盖的环境与引擎参数。

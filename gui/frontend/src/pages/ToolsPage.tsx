@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAppStore } from '../store/app'
 import { formatBytes } from '../utils'
+import { snapshotDiagnostics, visibleReminderCount } from '../lib/diagnostics'
 
 interface ToolLinkProps {
   badge?: string
@@ -16,10 +17,12 @@ interface ToolLinkProps {
 
 export function ToolsPage() {
   const snapshot = useAppStore((state) => state.snapshot)
+  const dismissed = useAppStore((state) => state.dismissedWarnings)
   if (!snapshot) return null
 
-  const issueCount = snapshot.doctor.error_count + snapshot.doctor.warn_count
-  const issueTone = snapshot.doctor.error_count ? 'error' : issueCount ? 'warning' : 'ok'
+  const diagnostics = snapshotDiagnostics(snapshot)
+  const issueCount = visibleReminderCount(diagnostics, dismissed)
+  const issueTone = diagnostics.some((item) => item.group === 'failure' && !dismissed[item.id]) ? 'error' : issueCount ? 'warning' : 'ok'
   const enabledSources = snapshot.assets.sources.filter((source) => !source.disabled).length
   const orphanSize = snapshot.assets.orphans.reduce((total, asset) => total + asset.size, 0)
 

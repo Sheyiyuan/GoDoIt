@@ -85,11 +85,42 @@ export interface EnvView {
   args: string[]
 }
 
+export type EnvScope = 'global' | 'platform' | 'instance'
+
+export interface ConfiguredEnvVar {
+  key: string
+  value: string
+  scope: EnvScope
+  editable: boolean
+  sensitive: boolean
+}
+
+export interface ConfiguredEnvView {
+  vars: ConfiguredEnvVar[]
+}
+
 export interface InstanceDetails {
   instance: InstanceInfo
   env: EnvView
+  configured_env: ConfiguredEnvView
   env_error?: string
   templates: TemplateInfo[]
+}
+
+export interface EnvironmentDetails {
+  configured: ConfiguredEnvView
+  effective: EnvView
+  effective_error?: string
+}
+
+export interface SessionInfo {
+  session_id: string
+  instance_id: string
+  instance_name: string
+  engine_id: string
+  pid: number
+  started_at: string
+  status: 'running' | 'stopping' | 'exited' | 'lost'
 }
 
 export type CheckStatus = 'ok' | 'warn' | 'error'
@@ -181,6 +212,12 @@ export interface InstallEntryRequest {
   template?: boolean
 }
 
+export interface InstallEntryResult {
+  instance: InstanceInfo
+  installed: Array<{ kind: string; id: string }>
+  state_rebuild_required?: boolean
+}
+
 export interface InstallSuggestionRequest {
   project_dir: string
   name: string
@@ -214,6 +251,28 @@ export interface ProgressEnvelope<T = unknown> {
   progress?: ProgressEvent
   result?: T
   error?: string
+}
+
+export interface OperationItem {
+  key: string
+  version?: string
+  source?: string
+  filename?: string
+  stage: string
+  bytes_downloaded?: number
+  total_bytes?: number
+}
+
+export interface OperationRecord {
+  id: string
+  operation: string
+  status: ProgressEnvelope['status']
+  started_at: string
+  finished_at?: string
+  summary?: string
+  error?: string
+  result_summary: string[]
+  items: OperationItem[]
 }
 
 export interface OperationStart {

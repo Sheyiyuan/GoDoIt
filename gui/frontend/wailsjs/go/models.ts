@@ -1,14 +1,14 @@
 export namespace bridge {
-	
+
 	export class BuildInfo {
 	    version: string;
 	    go_version: string;
 	    commit?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new BuildInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -22,11 +22,11 @@ export namespace bridge {
 	    sources: gdit.SourceInfo[];
 	    templates: gdit.TemplateInfo[];
 	    orphans: gdit.OrphanAsset[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AssetSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.engines = this.convertValues(source["engines"], gdit.InstalledVersion);
@@ -35,7 +35,7 @@ export namespace bridge {
 	        this.templates = this.convertValues(source["templates"], gdit.TemplateInfo);
 	        this.orphans = this.convertValues(source["orphans"], gdit.OrphanAsset);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -63,11 +63,11 @@ export namespace bridge {
 	    gui: gdit.GUISettings;
 	    build: BuildInfo;
 	    issues?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.root = source["root"];
@@ -79,7 +79,7 @@ export namespace bridge {
 	        this.build = this.convertValues(source["build"], BuildInfo);
 	        this.issues = source["issues"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -98,26 +98,62 @@ export namespace bridge {
 		    return a;
 		}
 	}
-	
-	
+
+
+	export class EnvironmentDetails {
+	    configured: gdit.ConfiguredEnvView;
+	    effective: gdit.EnvView;
+	    effective_error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new EnvironmentDetails(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.configured = this.convertValues(source["configured"], gdit.ConfiguredEnvView);
+	        this.effective = this.convertValues(source["effective"], gdit.EnvView);
+	        this.effective_error = source["effective_error"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class InstanceDetails {
 	    instance: gdit.InstanceInfo;
 	    env: gdit.EnvView;
+	    configured_env: gdit.ConfiguredEnvView;
 	    env_error?: string;
 	    templates: gdit.TemplateInfo[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstanceDetails(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.instance = this.convertValues(source["instance"], gdit.InstanceInfo);
 	        this.env = this.convertValues(source["env"], gdit.EnvView);
+	        this.configured_env = this.convertValues(source["configured_env"], gdit.ConfiguredEnvView);
 	        this.env_error = source["env_error"];
 	        this.templates = this.convertValues(source["templates"], gdit.TemplateInfo);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -138,32 +174,78 @@ export namespace bridge {
 	}
 	export class OperationStart {
 	    operation_id: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OperationStart(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.operation_id = source["operation_id"];
 	    }
 	}
+	export class SessionSnapshot {
+	    sessions: gdit.SessionInfo[];
+
+	    static createFrom(source: any = {}) {
+	        return new SessionSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessions = this.convertValues(source["sessions"], gdit.SessionInfo);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 
 export namespace gdit {
-	
+
+	export class AvailableVersion {
+	    version: string;
+	    editions: string[];
+	    sources: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new AvailableVersion(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.editions = source["editions"];
+	        this.sources = source["sources"];
+	    }
+	}
 	export class CheckResult {
 	    code: string;
 	    status: string;
 	    message: string;
 	    suggest?: string;
 	    details?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CheckResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -173,17 +255,67 @@ export namespace gdit {
 	        this.details = source["details"];
 	    }
 	}
+	export class ConfiguredEnvVar {
+	    key: string;
+	    value: string;
+	    scope: string;
+	    editable: boolean;
+	    sensitive: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ConfiguredEnvVar(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.scope = source["scope"];
+	        this.editable = source["editable"];
+	        this.sensitive = source["sensitive"];
+	    }
+	}
+	export class ConfiguredEnvView {
+	    vars: ConfiguredEnvVar[];
+
+	    static createFrom(source: any = {}) {
+	        return new ConfiguredEnvView(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.vars = this.convertValues(source["vars"], ConfiguredEnvVar);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DoctorReport {
 	    root: string;
 	    items: CheckResult[];
 	    ok_count: number;
 	    warn_count: number;
 	    error_count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DoctorReport(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.root = source["root"];
@@ -192,7 +324,39 @@ export namespace gdit {
 	        this.warn_count = source["warn_count"];
 	        this.error_count = source["error_count"];
 	    }
-	
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class EngineChannel {
+	    name: string;
+	    versions: AvailableVersion[];
+
+	    static createFrom(source: any = {}) {
+	        return new EngineChannel(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.versions = this.convertValues(source["versions"], AvailableVersion);
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -215,11 +379,11 @@ export namespace gdit {
 	    key: string;
 	    value: string;
 	    origin: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EnvVar(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -230,17 +394,17 @@ export namespace gdit {
 	export class EnvView {
 	    vars: EnvVar[];
 	    args: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EnvView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.vars = this.convertValues(source["vars"], EnvVar);
 	        this.args = source["args"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -261,11 +425,11 @@ export namespace gdit {
 	}
 	export class GUISettings {
 	    titlebar_style: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GUISettings(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.titlebar_style = source["titlebar_style"];
@@ -280,11 +444,11 @@ export namespace gdit {
 	    sdk_version?: string;
 	    set_current?: boolean;
 	    template?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstallEntryRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -304,11 +468,11 @@ export namespace gdit {
 	    sdk_version?: string;
 	    set_current?: boolean;
 	    include_template?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstallSuggestionRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project_dir = source["project_dir"];
@@ -322,11 +486,11 @@ export namespace gdit {
 	export class Target {
 	    os: string;
 	    arch: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Target(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.os = source["os"];
@@ -343,11 +507,11 @@ export namespace gdit {
 	    checksum: string;
 	    launcher: string;
 	    installed_at: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstalledVersion(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -360,7 +524,7 @@ export namespace gdit {
 	        this.launcher = source["launcher"];
 	        this.installed_at = source["installed_at"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -393,11 +557,11 @@ export namespace gdit {
 	    resolved_icon: string;
 	    icon_missing: boolean;
 	    icon_background: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstanceInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -420,11 +584,11 @@ export namespace gdit {
 	    id: string;
 	    size: number;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OrphanAsset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -433,15 +597,33 @@ export namespace gdit {
 	        this.path = source["path"];
 	    }
 	}
+	export class SDKChannel {
+	    major_minor: string;
+	    phase: string;
+	    release_type: string;
+	    versions: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new SDKChannel(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.major_minor = source["major_minor"];
+	        this.phase = source["phase"];
+	        this.release_type = source["release_type"];
+	        this.versions = source["versions"];
+	    }
+	}
 	export class SDKInfo {
 	    version: string;
 	    kind: string;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SDKInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -449,15 +631,58 @@ export namespace gdit {
 	        this.path = source["path"];
 	    }
 	}
+	export class SessionInfo {
+	    session_id: string;
+	    instance_id: string;
+	    instance_name: string;
+	    engine_id: string;
+	    pid: number;
+	    // Go type: time
+	    started_at: any;
+	    status: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SessionInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.session_id = source["session_id"];
+	        this.instance_id = source["instance_id"];
+	        this.instance_name = source["instance_name"];
+	        this.engine_id = source["engine_id"];
+	        this.pid = source["pid"];
+	        this.started_at = this.convertValues(source["started_at"], null);
+	        this.status = source["status"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SetInstanceIconRequest {
 	    icon: string;
 	    source_path?: string;
 	    background?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SetInstanceIconRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.icon = source["icon"];
@@ -469,11 +694,11 @@ export namespace gdit {
 	    name: string;
 	    kind: string;
 	    disabled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SourceInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -481,7 +706,7 @@ export namespace gdit {
 	        this.disabled = source["disabled"];
 	    }
 	}
-	
+
 	export class TemplateInfo {
 	    id: string;
 	    version: string;
@@ -494,11 +719,11 @@ export namespace gdit {
 	    size: number;
 	    installed_at: string;
 	    references: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TemplateInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];

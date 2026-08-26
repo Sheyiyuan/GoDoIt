@@ -23,15 +23,17 @@ const progressEventName = "gdit:progress"
 
 type managerFactory func(progress func(gdit.ProgressEvent)) (*gdit.Manager, error)
 type eventEmitter func(string, any)
+type closePrompter func(context.Context) (bool, error)
 
 // App 是 Wails 绑定对象，只保存生命周期上下文和可取消操作表。
 type App struct {
-	root       string
-	ctx        context.Context
-	mu         sync.Mutex
-	operations map[string]context.CancelFunc
-	newManager managerFactory
-	emit       eventEmitter
+	root        string
+	ctx         context.Context
+	mu          sync.Mutex
+	operations  map[string]context.CancelFunc
+	newManager  managerFactory
+	emit        eventEmitter
+	promptClose closePrompter
 }
 
 // ResolveRoot 委托 core 平台适配层解析 GUI 使用的 gdit 根目录。
@@ -42,6 +44,17 @@ func NewApp(root string) *App {
 	app := &App{root: root, ctx: context.Background(), operations: make(map[string]context.CancelFunc)}
 	app.newManager = func(progress func(gdit.ProgressEvent)) (*gdit.Manager, error) {
 		return gdit.New(gdit.Options{RootDir: root, Progress: progress})
+	}
+	app.promptClose = func(ctx context.Context) (bool, error) {
+		choice, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+			Type:          wailsruntime.QuestionDialog,
+			Title:         "仍有任务进行中",
+			Message:       "继续等待任务完成，或取消全部任务并退出。",
+			Buttons:       []string{"继续等待", "取消任务并退出"},
+			DefaultButton: "继续等待",
+			CancelButton:  "继续等待",
+		})
+		return choice == "取消任务并退出", err
 	}
 	return app
 }
@@ -60,15 +73,8 @@ func BeforeClose(app *App) func(context.Context) bool {
 		if app.activeOperationCount() == 0 {
 			return false
 		}
-		choice, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-			Type:          wailsruntime.QuestionDialog,
-			Title:         "仍有任务进行中",
-			Message:       "继续等待任务完成，或取消全部任务并退出。",
-			Buttons:       []string{"继续等待", "取消任务并退出"},
-			DefaultButton: "继续等待",
-			CancelButton:  "继续等待",
-		})
-		if err != nil || choice != "取消任务并退出" {
+		cancelAndExit, err := app.promptClose(ctx)
+		if err != nil || !cancelAndExit {
 			return true
 		}
 		app.cancelAll()
@@ -81,6 +87,9 @@ func (a *App) Bootstrap() (AppSnapshot, error) {
 	manager, err := a.newManager(nil)
 	if err != nil {
 		return AppSnapshot{}, err
+	}
+	if err := manager.Initialize(a.ctx); err != nil {
+		return AppSnapshot{Root: a.root}, err
 	}
 	snapshot := AppSnapshot{Root: a.root, Build: readBuildInfo(), GUI: gdit.GUISettings{TitlebarStyle: "auto"}}
 	if snapshot.GUI, err = manager.GUISettings(a.ctx); err != nil {
@@ -103,6 +112,9 @@ func (a *App) Bootstrap() (AppSnapshot, error) {
 	}
 	return snapshot, nil
 }
+
+// GetRoot 返回 GUI 当前使用的 gdit 根目录；不访问文件系统。
+func (a *App) GetRoot() string { return a.root }
 
 // GetGUISettings 返回 GUI 窗口偏好。
 func (a *App) GetGUISettings() (gdit.GUISettings, error) {
@@ -201,25 +213,53 @@ func (a *App) GetInstanceDetails(name string) (InstanceDetails, error) {
 	if err != nil {
 		environmentError = err.Error()
 	}
+	configured, configuredErr := manager.ConfiguredEnv(a.ctx, name)
+	if configuredErr != nil {
+		return InstanceDetails{}, configuredErr
+	}
 	templates, err := manager.Templates(a.ctx)
 	if err != nil {
 		return InstanceDetails{}, err
 	}
-	return InstanceDetails{Instance: *selected, Env: environment, EnvError: environmentError, Templates: templates}, nil
+	return InstanceDetails{Instance: *selected, Env: environment, Configured: configured, EnvError: environmentError, Templates: templates}, nil
 }
 
-// ListAvailableVersions 启动可取消的引擎版本枚举。
-func (a *App) ListAvailableVersions(source string) (OperationStart, error) {
-	return a.startOperation("available-versions", func(ctx context.Context, manager *gdit.Manager) (any, error) {
-		return manager.Available(ctx, source)
-	})
+// GetEnvironment 返回配置层和最终有效环境；有效环境计算失败时保留已读取的配置层。
+func (a *App) GetEnvironment(name string) (EnvironmentDetails, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return EnvironmentDetails{}, err
+	}
+	configured, err := manager.ConfiguredEnv(a.ctx, name)
+	if err != nil {
+		return EnvironmentDetails{}, err
+	}
+	details := EnvironmentDetails{Configured: configured}
+	effective, effectiveErr := manager.EffectiveEnv(a.ctx, name)
+	if effectiveErr != nil {
+		details.EffectiveError = effectiveErr.Error()
+		return details, nil
+	}
+	details.Effective = effective
+	return details, nil
 }
 
-// ListAvailableSDKs 启动可取消的 SDK 版本枚举。
-func (a *App) ListAvailableSDKs() (OperationStart, error) {
-	return a.startOperation("available-sdks", func(ctx context.Context, manager *gdit.Manager) (any, error) {
-		return manager.AvailableSDKs(ctx)
-	})
+// ListAvailableVersions 在后台读取引擎候选，不登记为 GUI 操作任务。
+func (a *App) ListAvailableVersions(source string) ([]gdit.EngineChannel, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return nil, err
+	}
+	return manager.Available(a.ctx, source)
+}
+
+// ListAvailableSDKs 在后台读取 SDK 候选，不登记为 GUI 操作任务。
+func (a *App) ListAvailableSDKs() ([]gdit.SDKChannel, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return nil, err
+	}
+	return manager.AvailableSDKs(a.ctx)
 }
 
 // GetDoctor 启动可取消的诊断；network 明确控制是否探测来源。
@@ -354,6 +394,46 @@ func (a *App) Launch(name string) error {
 	return command.Start()
 }
 
+// ListSessions 返回由 GoDoIt GUI 登记且仍可核验的会话。
+func (a *App) ListSessions() (SessionSnapshot, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return SessionSnapshot{}, err
+	}
+	sessions, err := manager.Sessions(a.ctx)
+	if err != nil {
+		return SessionSnapshot{}, err
+	}
+	return SessionSnapshot{Sessions: sessions}, nil
+}
+
+// LaunchSession 启动并登记一个 GUI 会话。
+func (a *App) LaunchSession(name string) (gdit.SessionInfo, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return gdit.SessionInfo{}, err
+	}
+	return manager.LaunchSession(a.ctx, name)
+}
+
+// RequestStopSession 请求会话正常退出。
+func (a *App) RequestStopSession(id string) (gdit.SessionInfo, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return gdit.SessionInfo{}, err
+	}
+	return manager.RequestStopSession(a.ctx, id)
+}
+
+// ForceStopSession 强制结束会话；前端必须先完成二次确认。
+func (a *App) ForceStopSession(id string) (gdit.SessionInfo, error) {
+	manager, err := a.newManager(nil)
+	if err != nil {
+		return gdit.SessionInfo{}, err
+	}
+	return manager.ForceStopSession(a.ctx, id)
+}
+
 // PickProjectDirectory 打开一次性项目目录选择器，不保存返回路径。
 func (a *App) PickProjectDirectory() (string, error) {
 	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{Title: "选择 Godot 项目目录"})
@@ -400,7 +480,14 @@ func (a *App) startOperation(operation string, run func(context.Context, *gdit.M
 		return OperationStart{}, err
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
+	var eventMu sync.Mutex
+	terminal := false
 	manager, err := a.newManager(func(event gdit.ProgressEvent) {
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		if terminal {
+			return
+		}
 		a.emitEvent(ProgressEnvelope{OperationID: id, Timestamp: time.Now().UTC().Format(time.RFC3339Nano), Status: "running", Operation: operation, Progress: &event})
 	})
 	if err != nil {
@@ -410,21 +497,35 @@ func (a *App) startOperation(operation string, run func(context.Context, *gdit.M
 	a.mu.Lock()
 	a.operations[id] = cancel
 	a.mu.Unlock()
+	// 先发布排队事件，确保前端在耗时任务真正开始前就能显示并提供取消入口。
+	a.emitEvent(ProgressEnvelope{OperationID: id, Timestamp: time.Now().UTC().Format(time.RFC3339Nano), Status: "running", Operation: operation, Progress: &gdit.ProgressEvent{Stage: "queued", Message: "已排队"}})
 	go func() {
 		result, runErr := run(ctx, manager)
+		eventMu.Lock()
+		if terminal {
+			eventMu.Unlock()
+			return
+		}
+		terminal = true
 		a.mu.Lock()
 		delete(a.operations, id)
 		a.mu.Unlock()
 		status := "complete"
 		errorText := ""
-		if runErr != nil {
+		if runErr != nil || errors.Is(ctx.Err(), context.Canceled) {
 			status = "failed"
-			errorText = runErr.Error()
+			if runErr != nil {
+				errorText = runErr.Error()
+			}
 			if errors.Is(runErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 				status = "canceled"
+				if errorText == "" {
+					errorText = context.Canceled.Error()
+				}
 			}
 		}
 		a.emitEvent(ProgressEnvelope{OperationID: id, Timestamp: time.Now().UTC().Format(time.RFC3339Nano), Status: status, Operation: operation, Result: result, Error: errorText})
+		eventMu.Unlock()
 		cancel()
 	}()
 	return OperationStart{OperationID: id}, nil

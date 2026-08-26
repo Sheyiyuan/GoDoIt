@@ -150,6 +150,50 @@ func TestResolveLaunchMergesEnvironmentWithoutChangingParent(t *testing.T) {
 	}
 }
 
+func TestConfiguredEnvSeparatesScopesAndMasksSensitiveKeys(t *testing.T) {
+	manager := phase3Manager(t)
+	if _, err := manager.InstallEntry(context.Background(), InstallEntryRequest{Name: "work", Version: "4.5.2", Edition: "standard"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetEnvVar(context.Background(), "", "API_TOKEN", "secret-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetEnvVar(context.Background(), "", "COMMON", "global"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetEnvVar(context.Background(), "work", "LOCAL", "instance"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := manager.ConfiguredEnv(context.Background(), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Vars) < 4 {
+		t.Fatalf("configured environment missing entries: %+v", view.Vars)
+	}
+	var token, local, display *ConfiguredEnvVar
+	for index := range view.Vars {
+		item := &view.Vars[index]
+		switch item.Key {
+		case "API_TOKEN":
+			token = item
+		case "LOCAL":
+			local = item
+		case "display_driver":
+			display = item
+		}
+	}
+	if token == nil || token.Scope != EnvScopeGlobal || !token.Editable || !token.Sensitive || token.Value != "secret-token" {
+		t.Fatalf("unexpected sensitive global variable: %+v", token)
+	}
+	if local == nil || local.Scope != EnvScopeInstance || !local.Editable {
+		t.Fatalf("unexpected instance variable: %+v", local)
+	}
+	if display == nil || display.Scope != EnvScopeGlobal || !display.Editable {
+		t.Fatalf("default control variable should remain editable global config: %+v", display)
+	}
+}
+
 func TestManagedSDKMissingDoesNotAccessNetworkDuringLaunch(t *testing.T) {
 	manager := phase3Manager(t)
 	if _, err := manager.Install(context.Background(), InstallRequest{Version: "4.5.2", Edition: "standard"}); err != nil {
@@ -649,7 +693,7 @@ func TestInstallSDKFallsBackFromMirror(t *testing.T) {
 		case strings.HasSuffix(request.URL.Path, "releases.json"):
 			return response(request, http.StatusOK, []byte(metadata)), nil
 		case request.URL.Host == "mirrors.huaweicloud.com":
-			return response(request, http.StatusNotFound, nil), nil
+			return response(request, http.StatusTeapot, nil), nil
 		default:
 			officialCalls++
 			return response(request, http.StatusOK, archiveData), nil
@@ -663,7 +707,7 @@ func TestInstallSDKFallsBackFromMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	if officialCalls != 1 {
-		t.Fatalf("official source must be used after the mirror 404s: official=%d", officialCalls)
+		t.Fatalf("official source must be used after the mirror returns 418: official=%d", officialCalls)
 	}
 	manifest, err := os.ReadFile(filepath.Join(manager.root, "sdks", "8.0.410", "install.toml"))
 	if err != nil {

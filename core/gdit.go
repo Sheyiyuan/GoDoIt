@@ -87,6 +87,21 @@ func New(options Options) (*Manager, error) {
 	return manager, nil
 }
 
+// Initialize 幂等创建 GUI 与 CLI 共用的 gdit 标准目录布局。
+// 初始化不创建 current 或 shim，不访问网络，也不修改 shell 配置。
+func (m *Manager) Initialize(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := store.New(m.root).Init(); err != nil {
+		return localIOError("initialize store", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Install 下载、校验并原子发布一个 Godot 版本。
 func (m *Manager) Install(ctx context.Context, request InstallRequest) (InstallResult, error) {
 	return m.installEngine(ctx, request, false)
@@ -926,11 +941,8 @@ func (m *Manager) download(ctx context.Context, artifact Artifact, destination, 
 	if _, err := validateDownloadURL(response.Request.URL.String()); err != nil {
 		return fmt.Errorf("%w: source redirect must use HTTPS", ErrInvalidConfig)
 	}
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
-		return SourceUnavailableError{Source: artifact.Source, Err: fmt.Errorf("http status %d", response.StatusCode)}
-	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("%w: source %s returned http status %d", ErrInvalidConfig, artifact.Source, response.StatusCode)
+		return SourceUnavailableError{Source: artifact.Source, Err: fmt.Errorf("http status %d", response.StatusCode)}
 	}
 	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {

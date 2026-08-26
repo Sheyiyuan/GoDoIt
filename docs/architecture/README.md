@@ -1,7 +1,9 @@
 # GoDoIt 架构设计
 
 
-> 状态为 v0.2 第六阶段 Linux 实现完成，macOS Apple Silicon 与 Windows x86_64 GUI 实机验证待完成
+> 状态为 v0.2 第六阶段 Linux 基础实现完成，阶段 A GUI 可用性实现与自动测试完成，阶段 B
+> 核心与 Linux GUI 工作流部分落地；Linux 视觉验收及 macOS Apple Silicon 与 Windows x86_64
+> GUI 实机验证待完成
 > 第四阶段 doctor（FR-08）验收见 §9.6；第五阶段实现见 §9.7；第六阶段实现与验收约束见 §9.8。
 > 本文档是 GoDoIt 的唯一架构真理源。
 
@@ -61,6 +63,10 @@ gdit 根目录默认是 `~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），并�
 │   └── <uuid>.toml              # 条目文件；文件名是 UUID v4，显示名存在文件内
 ├── icons/                       # 第六阶段：条目自定义图标（预设图标不复制到这里）
 │   └── <uuid>.png               # 以条目 UUID 命名的规范化 PNG
+├── runtime/                     # 阶段 B：GUI 启动的 Godot 运行会话登记，不属于用户配置或资产状态
+│   ├── sessions/
+│   │   └── <uuid>.toml          # 最小会话记录；不保存命令行、项目路径或环境变量
+│   └── .lock                    # 会话登记、清理和关闭复查使用的跨进程锁
 ├── current                      # 当前条目指针（第三阶段起；平台形态见下）
 ├── engines/                     # 引擎资产层（第二阶段的 versions/ 语义）
 │   ├── 4.5.2-standard/
@@ -96,6 +102,10 @@ gdit 根目录默认是 `~/.gdit/`（Windows 为 `%USERPROFILE%\.gdit`），并�
   用户通过显示名寻址（`gdit run <显示名>`），内部一律以 UUID 为准（current、引用、GC）。
 - `icons/` 只保存用户显式导入的条目图标；内置 Godot、C# 与 GoDoIt 吉祥物图标随 GUI 分发，
   不复制到用户目录。自定义图标以条目 UUID 命名，不能引用根目录外的任意路径。
+- `runtime/sessions/` 只登记由 GoDoIt GUI 启动的 Godot 会话，用于 GUI 重启后的恢复、关闭和条目
+  删除保护；不扫描或接管其他入口启动的进程，不写入 `state.toml`。目录可在首次 GUI 会话启动时
+  延迟创建；目录不存在等价于没有登记会话。会话文件和目录分别使用 0600、0700 权限（Windows
+  使用对应的仅当前用户可访问语义）。
 - `engines/` 下只放完整安装；未完成内容只能出现在 `tmp/`。SDK 资产 `sdks/` 与引擎同规则。
 - `cache/` 属于 FR-10（缓存管理，P2）预留，第一阶段不创建该目录，安装下载直接进入 `tmp/`。
 - 运行时文件锁可以放在 `~/.gdit/.lock`，它不是配置或项目 lock。
@@ -758,7 +768,7 @@ func (m *Manager) List(ctx context.Context) ([]InstalledVersion, error)
 func (m *Manager) Sources(ctx context.Context) ([]SourceInfo, error)
 func (m *Manager) SetDefaultSource(ctx context.Context, name string) error
 func (m *Manager) SetSourceDisabled(ctx context.Context, name string, disabled bool) error
-func (m *Manager) Available(ctx context.Context, sourceName string) ([]AvailableVersion, error)
+func (m *Manager) Available(ctx context.Context, sourceName string) ([]EngineChannel, error)
 func (m *Manager) Setup(ctx context.Context) error
 
 // 条目层（顶层命令；name/instance 参数均为显示名，core 内部解析为 UUID 再寻址）
@@ -776,6 +786,7 @@ func (m *Manager) SDKs(ctx context.Context) ([]SDKInfo, error)
 func (m *Manager) InstallSDK(ctx context.Context, version string) (SDKInstallResult, error)
 func (m *Manager) RemoveSDK(ctx context.Context, version string) error // 被条目引用的 SDK 拒绝删除
 func (m *Manager) EffectiveEnv(ctx context.Context, instance string) (EnvView, error)
+func (m *Manager) ConfiguredEnv(ctx context.Context, instance string) (ConfiguredEnvView, error) // 阶段 B
 func (m *Manager) SetEnvVar(ctx context.Context, instance, key, value string) error // 空=全局
 func (m *Manager) UnsetEnvVar(ctx context.Context, instance, key string) error
 
@@ -793,7 +804,8 @@ Wails 事件。
 错误文本不能成为 CLI 分支条件。
 
 `New` 只校验依赖和路径，不访问网络。`Install`、`List` 以及之后所有可能阻塞的操作接收
-`context.Context`。下载、锁等待和外部进程都必须传播取消。
+`context.Context`。下载、锁等待和外部探测进程都必须传播取消；阶段 B 已成功登记的 GUI Godot
+会话不绑定调用 context，其关闭只由显式会话 API 驱动。
 
 `Sources` 只读列出当前配置来源，不落盘不拿锁。`SetDefaultSource` 获取全局修改锁、锁内重读配置并
 调整 source_order、原子写回 config.toml，被禁用的来源不能 use。`SetSourceDisabled` 同样在锁内
@@ -805,7 +817,8 @@ Wails 事件。
 全局修改锁、锁内校验目标已完整安装后原子替换 symlink；`Remove` 获取锁、删除版本目录并原子重建
 state.toml，当前默认版本返回可识别错误；`Setup` 幂等创建或修复 shim，不修改 shell 配置或系统
 PATH；`ResolveLaunch` 解析启动目标（版本 ID 为空时取当前默认），校验完整安装后返回引擎可执行
-文件绝对路径，不做环境合并。启动子进程本身（execve 或 spawn）在 CLI 层，core 不持有子进程。
+文件绝对路径，不做环境合并。CLI `run`/shim 的启动子进程（execve 或 spawn）仍在 CLI 层，core
+不持有该路径的子进程；阶段 B GUI 登记会话由 core 的独立会话 API 启动和监督，不改变 CLI 契约。
 
 第三阶段新增（见 §9.5）：条目层 API——`InstallEntry` 编排完整条目安装：锁内安装引擎资产
 （如缺）→ 按 `[dotnet]` 策略解析并安装 SDK 依赖（managed 时）→ 原子写条目文件 →
@@ -1142,11 +1155,12 @@ releases.json 为稳定 JSON（`releases[].sdk.version`、`sdk.files[].name/hash
 maintenance/STS、`8.0` maintenance/LTS、`6.0` EOL；preview 通道 SDK 版本带 `-preview`
 后缀（如 `11.0.100-preview.7.26381.103`），版本校验接受该形态，推荐解析仍只取稳定版。
 注意元数据中资产名不含版本号（如 `dotnet-sdk-linux-x64.tar.gz`），下载 URL 以
-files[].url 为准。
+files[].url 为准。同一 RID 可能同时包含平台安装器和便携归档：macOS 必须选择 `.tar.gz` 而非
+`.pkg`，Windows 必须选择 `.zip` 而非 `.exe`；解析器同时匹配 RID 与平台归档格式。
 
 流程与引擎安装同一套：解析精确版本（只接受三段精确版本号）→ 查 releases.json 定位 sdk 条目与
-资产 → 下载到 `~/.gdit/tmp/<operation-id>/`（镜像优先、官方兜底；镜像同步延迟导致
-404/网络失败时自动降级官方，下载成功的来源记入 install.toml 的 source 字段）→ 按
+资产 → 下载到 `~/.gdit/tmp/<operation-id>/`（镜像优先、官方兜底；镜像返回任意非 2xx HTTP
+状态或发生网络失败时自动降级官方，下载成功的来源记入 install.toml 的 source 字段）→ 按
 SHA-512 校验 → 安全解压（tar.gz，约束与 zip 一致：拒绝绝对路径、越界 `..`、设备文件和
 逃逸目标目录的 symlink；顶层 `./` 目录条目安全跳过）→ 校验 dotnet 可执行文件并生成
 install.toml（记录版本、平台、摘要、launcher=dotnet）→ 原子发布到 `~/.gdit/sdks/<version>/`
@@ -1998,8 +2012,9 @@ x86_64 仍需按本节验收矩阵进行 GUI 实机验证，交叉编译不计�
 - GUI 可执行文件查找顺序为 `GDIT_GUI`（显式路径）、CLI 同目录、源码树中的
   `gui/build/bin/gdit-gui`、当前目录下的同一路径，最后才查找 PATH 中的 `gdit-gui`。
   macOS 应用包和 Windows `.exe` 均由启动器按固定候选路径识别。
-- `make run` 是仓库开发入口：先构建 GUI，再启动 `gui/build/bin/gdit-gui`；需要透传 CLI
-  参数时使用 `make run-cli <command> [ARGS=...]`。GUI 构建失败不得回退为启动 CLI。
+- `make run` 是仓库开发入口：先构建 GUI，再启动 GUI 可执行文件（macOS 为
+  `gui/build/bin/GoDoIt.app/Contents/MacOS/gdit-gui`，其余平台为 `gui/build/bin/gdit-gui`）；
+  需要透传 CLI 参数时使用 `make run-cli <command> [ARGS=...]`。GUI 构建失败不得回退为启动 CLI。
 
 #### 无边框窗口与自定义顶栏
 
@@ -2011,8 +2026,9 @@ x86_64 仍需按本节验收矩阵进行 GUI 实机验证，交叉编译不计�
   在 Windows 默认使用右上角的最小化、最大化和关闭按钮；用户可在设置页固定任一风格。
 - 顶栏按钮必须标注可访问名称并设置 `--wails-draggable: no-drag`，避免点击控件触发拖动；
   无边框窗口仍保留 Wails 的可调整大小能力。
-- GUI 首屏和条目图标使用仓库实际品牌资源：GoDoIt 使用 `assets/logo.svg`，Godot 和
-  C# 使用各自官方仓库/品牌 SVG；应用窗口图标使用现有吉祥物透明 PNG 裁出的头像，生成
+- GUI 首屏和条目图标使用仓库实际品牌资源：应用图标和 Web favicon 统一使用 `assets/icon.png`，
+  GoDoIt 顶栏标识仍使用 `assets/logo.svg`，Godot 和
+  C# 使用各自官方仓库/品牌 SVG；应用窗口图标直接使用该统一品牌图，生成
   `gui/build/appicon.png` 与 Windows `gui/build/windows/icon.ico`。
 - 条目图标按圆形显示但不绘制边框，也不使用预设背景色；用户可在图标选择器设置背景色，写入条目
   `[appearance] background`。字段缺失或空字符串表示透明，只接受 `#RRGGBB` 或
@@ -2028,7 +2044,7 @@ x86_64 仍需按本节验收矩阵进行 GUI 实机验证，交叉编译不计�
 |---|---|---|
 | `/instances` | 条目浏览、设为 current、启动、卸载；`+` 打开创建向导 | `Instances`、`SetDefault`、`RemoveInstance`、`ResolveLaunch` |
 | `/instances/:name` | 选中条目详情：运行时、环境、导出模板和操作记录 | `Default`、`EffectiveEnv`、`Templates`、`AttachTemplate`、`DetachTemplate` |
-| `/instances/new` | 创建条目向导：版本、edition、SDK、模板、current 确认 | `Available`、`AvailableSDKs`、`InstallEntry` |
+| `/instances/new` | 两步创建向导：同页配置条目、引擎、条件化 SDK、模板、图标与 current，再确认实际安装内容 | `Available`、`AvailableSDKs`、`InstallEntry` |
 | `/tools` | 工具汇总页：项目建议、诊断和资源管理入口 | 读取 bootstrap 快照，不直接执行修改动作 |
 | `/resources/engines`、`/resources/sdks`、`/resources/sources`、`/resources/cache` | 二级资源管理；查看引用、来源和孤儿清理 | `List`、`SDKs`、`Sources`、`Orphans`、`AutoRemove` |
 | `/suggest` | 显式选目录、分析证据、安装建议 | `Suggest`、`InstallSuggestion` |
@@ -2061,11 +2077,11 @@ dotnet/mono 版显示 C# 图标；Godot、C# 和 GoDoIt 吉祥物也可作为固
 状态、大小、引用关系和 `下载模板`/`重新下载`/`解除绑定`操作；模板安装仍由 core 的模板
 资产 API 完成，前端不得自行拼接模板 ID 或路径。
 
-**安装向导**为四步状态机：`Engine`（系列、精确版本、来源）→ `Runtime`（standard 或
-dotnet、managed/system、SDK patch）→ `Template`（匹配模板、大小、来源）→ `Review`。
-每一步只展示 core 返回的候选项；网络枚举期间显示可取消的进度状态。Review 页明确列出
-将安装的引擎/SDK/模板、预计占用、是否设为 current；只有点击 `Install` 才调用
-`InstallEntry` 或 `InstallSuggestion`。
+**安装向导**为两步状态机：`配置` 同页完成条目名、来源、引擎 edition/版本、运行时、模板、
+图标和 current 设置，`确认` 只列出实际将安装或使用的内容。Standard 不展示或提交 SDK 策略；
+Godot 3.x dotnet 固定使用系统 Mono；只有 Godot 4.x+ dotnet 才展示 managed/system 策略，managed
+允许把 SDK patch 留空，由 core 根据 Godot 版本解析推荐版本。候选枚举期间只在当前页面显示后台
+加载状态，不进入操作中心；只有点击 `Install` 才调用 `InstallEntry` 或 `InstallSuggestion`。
 
 **Suggest** 先选择目录，再显示 `project.godot`、`global.json`、`.csproj` 的证据行。
 error 以阻断色显示并禁用安装，warning 不阻断但必须在 Review 中再次出现；路径只在本次
@@ -2087,20 +2103,168 @@ React 状态中存在，Wails bridge 不写入持久配置。
 
 ```text
 Bootstrap() -> AppSnapshot
+GetRoot() -> string
 ListInstances() / GetDefault() / ListAssets() / GetDoctor(network)
 ListAvailableVersions(source) / ListAvailableSDKs()
 InstallEntry(request) / InstallSuggestion(request)
 SetDefault(name) / RemoveInstance(name) / AutoRemove()
 SetInstanceIcon(name, request)
-Suggest(projectDir) / SetEnvVar(scope, key, value)
+Suggest(projectDir) / GetEnvironment(name) / SetEnvVar(scope, key, value)
 ListSources() / SetSourceDisabled(name, disabled) / SetDefaultSource(name)
+ListSessions() / LaunchSession(name) / RequestStopSession(sessionID) / ForceStopSession(sessionID)
 Cancel(operationID)
 ```
 
-每个耗时调用返回 `operationID`，并通过 Wails 事件 `gdit:progress` 推送 `ProgressEvent`，
+阶段 A 约束：GUI 启动后先调用 core 的 `Initialize(ctx)`，该方法幂等创建标准 gdit
+目录，不创建 `current` 或 shim、不访问网络且不修改 shell/PATH。初始化失败时 Bootstrap
+返回可重试的启动错误，错误页通过只读且不访问文件系统的 `GetRoot` 显示实际目标根目录；
+初始化成功后各局部读取错误进入 `AppSnapshot.issues`，不得用空数组
+伪装为“没有安装内容”。Doctor 的完整语义保持不变，GUI 仅将问题分为故障、需要注意和可选
+命令行集成；可选集成默认折叠且不计入提醒数量。
+
+会产生持久修改、可展示进度或需要用户取消的耗时调用返回 `operationID`，并通过 Wails 事件
+`gdit:progress` 推送 `ProgressEvent`，
 事件增加 bridge 侧的 `operation_id` 和 `timestamp` 包装字段但不修改 core 事件内容。
-终态事件为 `complete | failed | canceled`；React 以 `operationID` 合并事件，禁止按版本
-字符串猜测进度。窗口重载后调用 `Bootstrap`，不从本地缓存恢复半成品状态。
+操作注册成功后 bridge 必须立即发送一次 `status=running`、`stage=queued` 事件，再转发
+core 进度；终态事件为 `complete | failed | canceled`，每个 operation 只能产生一次终态。
+React 以 `operationID` 合并顶层任务，并以 `version + filename + source` 形成下载子任务展示键，
+不得把该键写回 core。下载且总大小已知时显示字节进度，其他阶段使用不定进度。窗口重载后
+调用 `Bootstrap`，不从本地缓存恢复半成品状态。
+
+设置页通过 store 的 `updateGUISettings` 调用 bridge；写入成功后原子更新
+`snapshot.gui.titlebar_style`，Layout 必须立即重新解析顶栏样式。写入失败保持旧配置与旧视图。
+
+#### 阶段 B：主要桌面工作流
+
+阶段 B 在阶段 A 的 bootstrap 与 operation 契约稳定后实施，范围固定为候选预取与分类、工作区
+滚动模型、current 的 Pin 交互、GUI 运行会话和环境变量编辑。阶段 B 不增加磁盘候选缓存、收藏或
+多 current，不把 CLI `gdit run` 纳入 GUI 会话，也不扩大项目目录的读取与持久化范围。
+
+**候选预取与分类**：`Bootstrap` 成功并完成首屏渲染后，React 并行启动一次默认来源的引擎候选
+和 SDK 候选枚举。`ListAvailableVersions` 与 `ListAvailableSDKs` 是普通异步只读调用，直接返回候选，
+不创建 operation、不发送 `gdit:progress`、不进入操作中心，也不计入关闭窗口时的进行中任务；调用随
+GUI 生命周期 context 取消。预取不阻塞首屏、不写磁盘；每类候选在同一窗口内最多有一个进行中的请求。
+创建向导复用进行中或已完成的结果，进行中点击刷新不重复请求，完成后可显式重新枚举。
+
+引擎只按 core 返回的 `4.x`、`3.x`、`unstable` channel 展示，SDK 只按 core 返回的 major/minor、
+phase 与 release type 展示；前端不得重新解析版本字符串、推断 edition 支持或重排业务优先级。
+来源切换后保留仍合法的选择，否则选中该 channel 的第一项。空结果、部分来源失败和全部失败是
+不同视图状态，core warning 必须随候选结果保留到向导，不并入 bootstrap 故障。
+
+**工作区滚动模型**：窗口壳、主内容区和路由页占满可用高度；路由页使用稳定的
+`header / body / footer` 三段布局，只有 body 设置 `min-height: 0; overflow: auto`。条目详情的
+启动与上下文动作留在 header；向导的主操作留在 footer。资源表、Doctor 列表、候选网格和环境变量
+列表各自只允许一个同方向滚动容器。900x620 最小窗口下所有主操作必须可达，窄窗口转换布局时不
+隐藏字段，长名称、路径、环境值和错误文本不得挤压或遮挡操作控件。
+
+**Pin 交互**：Pin 只是唯一 `current` 指针的 GUI 表达，仍调用 core `SetDefault`，不新增收藏、
+排序或多个 pin。界面动作统一写“设为当前”，当前状态写“已固定为当前启动条目”；创建向导和
+Suggest 使用“安装后设为当前条目”。切换前说明普通 `godot` 与 GUI 默认启动入口将使用的新条目，
+失败时保留旧 current。除来源优先级的“默认来源”外，GUI 不使用 `default` 指代条目切换。
+
+**结构化环境读取与编辑**：`EffectiveEnv` 是启动合并结果，不能反推用户配置。core 新增只读的
+`ConfiguredEnv(ctx, name)`，分别返回全局、当前平台和条目配置层；空 name 表示只读取全局与当前
+平台配置。返回项至少包含 `key / value / scope / editable / sensitive`，按 scope 与平台规范化键
+稳定排序。全局和条目项可编辑，当前平台项只读；派生项和最终有效值继续由 `EffectiveEnv` 提供，
+托管 SDK 缺失等有效环境计算错误不得抹掉已经成功读取的配置层。
+
+```go
+type EnvScope string
+
+const (
+	EnvScopeGlobal   EnvScope = "global"
+	EnvScopePlatform EnvScope = "platform"
+	EnvScopeInstance EnvScope = "instance"
+)
+
+type ConfiguredEnvVar struct {
+	Key       string   `json:"key"`
+	Value     string   `json:"value"`
+	Scope     EnvScope `json:"scope"`
+	Editable  bool     `json:"editable"`
+	Sensitive bool     `json:"sensitive"`
+}
+
+type ConfiguredEnvView struct {
+	Vars []ConfiguredEnvVar `json:"vars"`
+}
+
+func (m *Manager) ConfiguredEnv(ctx context.Context, name string) (ConfiguredEnvView, error)
+```
+
+bridge 的 `GetEnvironment(name)` 组合 `ConfiguredEnv` 与 `EffectiveEnv`，保留配置层并单独返回
+`effective_error`。写操作继续使用现有 `SetEnvVar(scope, key, value)` 与 `UnsetEnvVar(scope, key)`；
+前端只能提交空 scope（全局）或条目显示名，不能提交 `platform`、`derived` 或 `effective` 伪作用域。
+敏感键判定复用 doctor 的稳定规则；值默认掩码，只有用户主动展开当前单项时显示，关闭对话框后
+恢复掩码。bridge、operation、错误和测试日志不得记录环境变量值。
+
+**GUI 运行会话**：会话管理属于 core 的共享数据与并发规则，不能只放在单个 bridge 内存中，
+否则 CLI 删除条目或多个 GUI 窗口并发时无法执行一致的删除保护。core 负责进程启动与 waiter、
+会话记录、跨进程锁、进程身份复查和 `RemoveInstance` 的运行中保护；bridge 只把 Wails 请求与
+core 会话事件映射到前端。CLI `gdit run` 继续走既有启动路径，不登记为 GUI 会话。
+
+```go
+type SessionStatus string
+
+const (
+	SessionRunning  SessionStatus = "running"
+	SessionStopping SessionStatus = "stopping"
+	SessionExited   SessionStatus = "exited"
+	SessionLost     SessionStatus = "lost"
+)
+
+type SessionInfo struct {
+	SessionID    string        `json:"session_id"`
+	InstanceID   string        `json:"instance_id"`
+	InstanceName string        `json:"instance_name"`
+	EngineID     string        `json:"engine_id"`
+	PID          int           `json:"pid"`
+	StartedAt    time.Time     `json:"started_at"`
+	Status       SessionStatus `json:"status"`
+}
+
+func (m *Manager) Sessions(ctx context.Context) ([]SessionInfo, error)
+func (m *Manager) LaunchSession(ctx context.Context, name string) (SessionInfo, error)
+func (m *Manager) RequestStopSession(ctx context.Context, sessionID string) (SessionInfo, error)
+func (m *Manager) ForceStopSession(ctx context.Context, sessionID string) (SessionInfo, error)
+```
+
+磁盘记录只保存 `session_id / instance_id / instance_name / engine_id / pid / process_identity /
+started_at`。`process_identity` 是 platform 适配层返回的不透明创建标识；恢复和关闭必须同时核验
+PID、创建标识及由 engine manifest 解析出的目标可执行文件，任一不匹配都不得发送信号，只把记录
+标为失联并清理。业务代码不出现 `runtime.GOOS`：Linux、macOS、Windows 的身份读取、正常关闭与
+强制结束都位于 `core/internal/platform` 的分平台文件中。可执行文件路径不落盘；恢复或关闭时
+由 `engine_id` 重新扫描已安装 manifest 推导，避免会话记录保存路径信息。
+
+启动会话时先获取全局修改锁，锁内重新解析条目与引擎，创建进程并在 `runtime/.lock` 下原子登记，
+然后释放锁；`RemoveInstance` 按同一顺序获取全局修改锁再获取 runtime 锁，发现已核验的运行会话
+时返回稳定的“条目正在运行”错误。登记失败必须立即请求关闭刚启动的进程，并返回同时包含登记与
+清理结果的错误，不能把未登记进程报告为成功。退出 waiter 只获取 runtime 锁删除记录，不能反向
+获取全局修改锁。`LaunchSession` 的 context 只控制解析、加锁和启动登记，不绑定已经成功登记的
+Godot 生命周期；GUI context 取消或窗口关闭不能结束 Godot。所有调用都必须遵守“全局修改锁 ->
+runtime 锁”的唯一顺序。
+
+正常关闭只发送平台的友好关闭请求并进入 `stopping`；超时后 UI 显示“仍在运行”并提供独立的
+“强制结束”，不得自动升级。强制结束需要二次确认。已经退出、失联或身份不匹配的记录只清理，
+不发送信号。同一条目允许多个 session，每次启动使用新的 UUID；关闭 GUI 不关闭 Godot。其他 GUI
+进程通过定期调用 `Sessions` 收敛，不依赖只在单进程内可见的 Wails 事件。
+
+bridge 增加 `ListSessions / Launch / RequestStopSession / ForceStopSession`，前端关闭接口只提交
+`session_id`，不得提交 PID、路径或 process identity。`gdit:session` 事件只用于当前窗口的即时
+刷新，状态为 `running | stopping | exited | lost`；事件由 core 的会话回调产生并由 bridge 原样
+包装。持久真相始终以 core 复查后的 session 记录为准。
+
+阶段 B 的实现顺序固定如下：
+
+1. 先完成候选状态复用、分类 fixture、Pin 文案与工作区滚动模型；这些改动不得增加持久数据。
+2. 增加 `ConfiguredEnv` 及敏感键/Windows 大小写测试，再接入设置页和条目环境对话框。
+3. 增加 runtime session store、锁顺序和假进程平台适配测试，再接入 core waiter、bridge 事件转发
+   与前端会话面板。
+4. 完成 Linux 多开、自然退出、GUI 重启恢复、正常关闭、强制结束、PID 复用和最小窗口验收；
+   macOS Apple Silicon 与 Windows x86_64 的同类实机结果进入第六阶段最终发布门禁。
+
+任一会话测试都必须使用临时 gdit 根目录和可控假进程，不启动真实 Godot、不读取或终止开发者
+进程。候选测试使用固定 source fixture；环境测试不得把敏感值写入快照、错误或测试失败输出。
 
 #### 状态、错误与安全
 
@@ -2158,6 +2322,12 @@ current、edition、SDK 和引用状态。
 6. 条目列表第一项固定为 `+` 新建；图标选择增加 `缺省`，普通版缺省显示 Godot，
    dotnet/mono 版缺省显示 C#，并可固定选择 Godot、C#、GoDoIt 吉祥物或自定义图标。
    （用户已明确。）
+7. 阶段 B 候选只在当前窗口内预取并复用，不新增磁盘缓存。（建议：接受。）
+8. Pin 只表达唯一 current，不新增收藏、排序或多个 pinned 条目。（建议：接受。）
+9. GUI 运行会话需要跨 GUI 重启恢复，因此新增 `runtime/sessions/`；进程启动与 waiter、会话真相、
+   锁和删除保护由 core 管理，bridge 只做 Wails 适配。（已按该方案实现；实机与多窗口验收待补。）
+10. GUI 只编辑全局与条目环境变量；当前平台配置、派生变量和最终有效值只读。
+    （建议：接受。）
 
 ## 10. Review 结论
 

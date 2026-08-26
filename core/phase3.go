@@ -237,6 +237,11 @@ func (m *Manager) RemoveInstance(ctx context.Context, name string) (RemoveInstan
 		return RemoveInstanceResult{}, contextOrLocalIOError("acquire store lock", err)
 	}
 	defer guard.Close()
+	if running, sessionErr := m.hasRunningSession(ctx, name); sessionErr != nil {
+		return RemoveInstanceResult{}, sessionErr
+	} else if running {
+		return RemoveInstanceResult{}, fmt.Errorf("%w: %s", ErrInstanceRunning, name)
+	}
 	items, err := instance.Scan(m.root)
 	if err != nil {
 		return RemoveInstanceResult{}, fmt.Errorf("%w: cannot determine asset references: %v", ErrInvalidConfig, err)
