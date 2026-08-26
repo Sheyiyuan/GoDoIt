@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +13,21 @@ import (
 	"github.com/Sheyiyuan/GoDoIt/core/internal/session"
 )
 
+const sessionProcessHelperEnvironment = "GDIT_SESSION_PROCESS_HELPER"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(sessionProcessHelperEnvironment) == "1" {
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 func TestSessionRecordRoundTripAndIdentityMismatch(t *testing.T) {
+	target, err := platform.CurrentTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "runtime"), 0o700); err != nil {
 		t.Fatal(err)
@@ -43,6 +56,9 @@ func TestSessionRecordRoundTripAndIdentityMismatch(t *testing.T) {
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			t.Fatalf("stat session path %s: %v", path, statErr)
+		}
+		if target.OS == "windows" {
+			continue
 		}
 		if got := info.Mode().Perm(); got != 0o700 && path != session.Path(root, record.SessionID) {
 			t.Fatalf("directory %s mode = %o, want 700", path, got)
@@ -74,23 +90,39 @@ func TestSessionRecordRoundTripAndIdentityMismatch(t *testing.T) {
 }
 
 func TestStartManagedProcessCanBeStoppedWithoutContextCoupling(t *testing.T) {
-	process, err := platform.StartManagedProcess(context.Background(), "/bin/sh", []string{"-c", "sleep 30"}, os.Environ())
+	target, err := platform.CurrentTarget()
 	if err != nil {
 		t.Fatal(err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := append(os.Environ(), sessionProcessHelperEnvironment+"=1")
+	process, err := platform.StartManagedProcess(context.Background(), executable, nil, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	t.Cleanup(func() {
+		if !stopped {
+			_ = platform.ForceStop(process.PID)
+		}
+	})
 	waited := make(chan error, 1)
 	go func() { waited <- process.Wait() }()
-	alive, err := platform.ProcessAlive(process.PID, process.Identity, "/bin/sh")
+	alive, err := platform.ProcessAlive(process.PID, process.Identity, executable)
 	if err != nil || !alive {
 		t.Fatalf("started fixture process is not alive: alive=%v err=%v", alive, err)
 	}
-	if err := platform.RequestStop(process.PID); err != nil {
+	if err := stopFixtureProcess(target, process.PID); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-time.After(2 * time.Second):
 		t.Fatal("fixture process did not stop")
 	case <-waited:
+		stopped = true
 	}
 }
 
@@ -99,14 +131,15 @@ func TestManagedSessionLifecycleEmitsEventsAndProtectsInstance(t *testing.T) {
 	if err != nil {
 		t.Skipf("current platform is not supported: %v", err)
 	}
-	fixture, err := exec.LookPath("yes")
+	fixture, err := os.Executable()
 	if err != nil {
-		t.Skip("yes fixture process is unavailable")
+		t.Fatal(err)
 	}
 	fixtureData, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(sessionProcessHelperEnvironment, "1")
 	root := t.TempDir()
 	events := make(chan SessionInfo, 8)
 	manager, err := New(Options{RootDir: root, Session: func(info SessionInfo) { events <- info }})
@@ -117,7 +150,7 @@ func TestManagedSessionLifecycleEmitsEventsAndProtectsInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	const engineID = "4.5.2-standard"
-	const launcher = "fixture-engine"
+	launcher := "fixture-engine" + filepath.Ext(fixture)
 	payload := filepath.Join(root, "engines", engineID, "payload")
 	if err := os.MkdirAll(payload, 0o755); err != nil {
 		t.Fatal(err)
@@ -135,22 +168,43 @@ func TestManagedSessionLifecycleEmitsEventsAndProtectsInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	exited := false
+	t.Cleanup(func() {
+		if !exited {
+			_ = platform.ForceStop(started.PID)
+		}
+	})
 	if event := waitSessionEvent(t, events, SessionRunning); event.SessionID != started.SessionID {
 		t.Fatalf("running event session = %q, want %q", event.SessionID, started.SessionID)
 	}
 	if _, err := manager.RemoveInstance(context.Background(), "session-fixture"); !errors.Is(err, ErrInstanceRunning) {
 		t.Fatalf("running session did not protect instance: %v", err)
 	}
-	stopping, err := manager.RequestStopSession(context.Background(), started.SessionID)
+	stopping, err := stopFixtureSession(manager, target, started.SessionID)
 	if err != nil || stopping.Status != SessionStopping {
 		t.Fatalf("request stop result = %+v err=%v", stopping, err)
 	}
 	waitSessionEvent(t, events, SessionStopping)
 	waitSessionEvent(t, events, SessionExited)
+	exited = true
 	items, err := manager.Sessions(context.Background())
 	if err != nil || len(items) != 0 {
 		t.Fatalf("exited session was not cleaned: %+v err=%v", items, err)
 	}
+}
+
+func stopFixtureProcess(target platform.Target, pid int) error {
+	if target.OS == "windows" {
+		return platform.ForceStop(pid)
+	}
+	return platform.RequestStop(pid)
+}
+
+func stopFixtureSession(manager *Manager, target platform.Target, id string) (SessionInfo, error) {
+	if target.OS == "windows" {
+		return manager.ForceStopSession(context.Background(), id)
+	}
+	return manager.RequestStopSession(context.Background(), id)
 }
 
 func waitSessionEvent(t *testing.T, events <-chan SessionInfo, status SessionStatus) SessionInfo {

@@ -127,6 +127,7 @@ jobs:
           GOFLAGS: -tags=webkit2_41
         run: |
           pnpm --dir gui/frontend run check
+          pnpm --dir gui/frontend run build
           go test ./core/... ./cli/... ./gui/...
           go vet ./core/... ./cli/... ./gui/...
 
@@ -192,6 +193,7 @@ jobs:
       - name: Run native tests and vet
         run: |
           pnpm --dir gui/frontend run check
+          pnpm --dir gui/frontend run build
           go test ./core/... ./cli/... ./gui/...
           go vet ./core/... ./cli/... ./gui/...
 
@@ -264,6 +266,7 @@ jobs:
         shell: pwsh
         run: |
           pnpm --dir gui/frontend run check
+          pnpm --dir gui/frontend run build
           go test ./core/... ./cli/... ./gui/...
           go vet ./core/... ./cli/... ./gui/...
 
