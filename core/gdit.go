@@ -39,6 +39,7 @@ type Manager struct {
 	root     string
 	client   *http.Client
 	progress func(ProgressEvent)
+	session  func(SessionInfo)
 	sources  []Source
 	now      func() time.Time
 	sdkProbe func(context.Context) ([]SDKInfo, error)
@@ -70,6 +71,7 @@ func New(options Options) (*Manager, error) {
 		root:     root,
 		client:   client,
 		progress: options.Progress,
+		session:  options.Session,
 		sources:  append([]Source(nil), options.Sources...),
 		now:      time.Now,
 	}
@@ -85,6 +87,21 @@ func New(options Options) (*Manager, error) {
 		}
 	}
 	return manager, nil
+}
+
+// Initialize 幂等创建 GUI 与 CLI 共用的 gdit 标准目录布局。
+// 初始化不创建 current 或 shim，不访问网络，也不修改 shell 配置。
+func (m *Manager) Initialize(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := store.New(m.root).Init(); err != nil {
+		return localIOError("initialize store", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Install 下载、校验并原子发布一个 Godot 版本。
@@ -334,6 +351,34 @@ func (m *Manager) Sources(ctx context.Context) ([]SourceInfo, error) {
 		result = append(result, SourceInfo{Name: entry.Name, Kind: entry.Kind, Disabled: entry.Disabled})
 	}
 	return result, nil
+}
+
+// GUISettings 返回 GUI 窗口偏好，只读配置且不访问网络。
+func (m *Manager) GUISettings(ctx context.Context) (GUISettings, error) {
+	cfg, err := config.Load(m.root)
+	if err != nil {
+		return GUISettings{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	return GUISettings{TitlebarStyle: cfg.GUI.TitlebarStyle}, nil
+}
+
+// SetGUISettings 更新 GUI 窗口偏好并原子写回 config.toml。
+func (m *Manager) SetGUISettings(ctx context.Context, settings GUISettings) error {
+	if err := config.ValidateTitlebarStyle(settings.TitlebarStyle); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
+		return localIOError("create store root", err)
+	}
+	guard, err := lock.Acquire(ctx, store.New(m.root).LockPath())
+	if err != nil {
+		return contextOrLocalIOError("acquire store lock", err)
+	}
+	defer guard.Close()
+	if err := config.SetTitlebarStyle(m.root, settings.TitlebarStyle); err != nil {
+		return localIOError("update GUI settings", err)
+	}
+	return nil
 }
 
 // SetDefaultSource 把指定来源移到 source_order 首位并原子写回 config.toml。
@@ -628,7 +673,7 @@ func (m *Manager) Default(ctx context.Context) (InstanceInfo, error) {
 		}
 		return InstanceInfo{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	return instanceToPublic(item, true), nil
+	return instanceToPublic(m.root, item, true), nil
 }
 
 // SetDefault 原子地把指定显示名条目设为 current。
@@ -898,11 +943,8 @@ func (m *Manager) download(ctx context.Context, artifact Artifact, destination, 
 	if _, err := validateDownloadURL(response.Request.URL.String()); err != nil {
 		return fmt.Errorf("%w: source redirect must use HTTPS", ErrInvalidConfig)
 	}
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
-		return SourceUnavailableError{Source: artifact.Source, Err: fmt.Errorf("http status %d", response.StatusCode)}
-	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("%w: source %s returned http status %d", ErrInvalidConfig, artifact.Source, response.StatusCode)
+		return SourceUnavailableError{Source: artifact.Source, Err: fmt.Errorf("http status %d", response.StatusCode)}
 	}
 	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {

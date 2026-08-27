@@ -16,19 +16,19 @@ const sorted = (id: string) => all.filter((entry) => entry.data.section === id).
 
 <Wiki title="Wiki · GoDoIt" description="GoDoIt 的教程、操作指南、参考和设计解释。">
 	<header class="doc-header wiki-header">
-		<p class="doc-kicker">Documentation / v0.2 · Phase 4 implemented</p>
+		<p class="doc-kicker">Documentation / v0.2 · Phase 6 on Linux · Stages A-C implemented</p>
 		<h1>GoDoIt Wiki</h1>
-		<p class="doc-description">第四阶段能力已经落地，第五阶段设计正在 review。第一次来从教程开始；需要核对边界时先看开发状态。</p>
-		<p class="platform-note"><img src="/windows.svg" alt="" />Windows x86_64 已纳入验证级支持，与 macOS arm64 共用发布门禁。</p>
+		<p class="doc-description">第六阶段的阶段 A、B 桌面工作流和阶段 C 发布完整性代码已经落地；Linux 视觉验收、三平台发布 CI 首次运行及 macOS/Windows 实机验收待完成。第一次来先安装发行包；需要核对边界时看开发状态。</p>
+		<p class="platform-note">Linux amd64、macOS arm64、Windows x86_64 原生发布门禁已配置，后两者仍是验证级支持。</p>
 	</header>
 
 	<section class="start-path" aria-labelledby="start-title">
 		<div>
 			<p class="route-label">推荐路线</p>
-			<h2 id="start-title">先把第一个引擎跑起来</h2>
-			<p>沿着页面看可用版本，创建条目，启动编辑器，然后确认当前配置。</p>
+			<h2 id="start-title">先安装 GoDoIt，再启动第一个引擎</h2>
+			<p>下载当前平台归档，校验摘要，再沿教程创建条目并启动编辑器。</p>
 		</div>
-			<a href="/wiki/tutorials/hello-godot/">开始教程 <ArrowUpRight size={17} stroke-width={1.8} aria-hidden="true" /></a>
+			<a href="/wiki/how-to/install-godoit/">开始安装 <ArrowUpRight size={17} stroke-width={1.8} aria-hidden="true" /></a>
 	</section>
 
 	<div class="section-list">
@@ -57,7 +57,6 @@ const sorted = (id: string) => all.filter((entry) => entry.data.section === id).
 	<style>
 		.wiki-header { max-width: 700px; }
 		.platform-note { display: inline-flex; align-items: center; gap: 0.45rem; margin: 1rem 0 0; color: var(--ink-faint); font-size: 0.82rem; }
-		.platform-note img { width: 16px; height: 16px; flex: 0 0 auto; }
 		.start-path {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;

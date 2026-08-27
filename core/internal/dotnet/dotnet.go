@@ -292,12 +292,17 @@ func ResolveArtifact(ctx context.Context, client *http.Client, version string, t
 	if err != nil {
 		return Artifact{}, err
 	}
+	archiveSuffix := "." + platform.SDKArchiveFormat(target)
 	for _, release := range metadata.Releases {
 		if release.SDK == nil || release.SDK.Version != version {
 			continue
 		}
 		for _, file := range release.SDK.Files {
 			if file.RID != rid || file.URL == "" {
+				continue
+			}
+			assetURL, parseErr := url.Parse(file.URL)
+			if parseErr != nil || !strings.HasSuffix(strings.ToLower(assetURL.Path), archiveSuffix) {
 				continue
 			}
 			hash := strings.ToLower(strings.TrimSpace(file.Hash))

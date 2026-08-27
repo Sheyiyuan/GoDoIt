@@ -1,9 +1,10 @@
 # GoDoIt 命令参考（操作 ↔ 指令）
 
-> 状态：v0.2 第五阶段实现完成、发布候选验证中（suggest + 导出模板）
+> 状态：v0.2 第五阶段 CLI 实现完成；第六阶段 Linux 基础 GUI 与阶段 A、B 自动测试已完成，
+> 阶段 C 发布身份和三平台归档流程已落地
 > 本文档从用户操作视角列出所有指令与输出约定；设计语义以
 > [`docs/architecture/README.md`](architecture/README.md) 为唯一真理源。
-> 本文记录截至第五阶段的命令面。第三阶段起不保留第二阶段命令兼容层。
+> 本文记录截至第五阶段的 CLI 命令面；第六阶段 GUI 不改变这些命令契约。第三阶段起不保留第二阶段命令兼容层。
 
 ## 1. 操作与指令对照
 
@@ -36,6 +37,9 @@
 | 创建 godot 命令入口 | `gdit setup` | 创建/修复 `~/.gdit/bin/godot` shim；不改 shell 配置和系统 PATH，bin 不在 PATH 时提示 |
 | 启动当前条目 | `gdit run [-- 参数]` / `gdit run -d [-- 参数]` | 等价于裸 `godot`；无参数 + TTY 且多于一个条目时先交互选择要启动的条目 |
 | 启动指定条目 | `gdit run <name> [-- 参数]` | 不改变 current；显示名与版本输入/资产 ID 分属不同命名空间 |
+| 启动桌面 GUI | `gdit gui [参数]` | 启动配套的 `gdit-gui`，参数和 GUI 退出码原样透传；可用 `GDIT_GUI` 指定路径 |
+
+仓库开发时，`make run` 会先构建并启动 GUI；需要启动 CLI 可使用 `make run-cli <command>`。
 
 ### 1.3 引擎资产管理
 
@@ -95,10 +99,11 @@
 | 探测来源可达性 | `gdit doctor --network` | 额外探测启用来源；单来源失败为警告，全部失败为错误 |
 | 展开诊断细节 | `gdit doctor --verbose` | 展开环境变量来源、来源状态与修复建议；敏感值仍保持掩码 |
 
-### 1.9 帮助
+### 1.9 构建身份与帮助
 
 | 操作 | 指令 |
 |---|---|
+| 查看版本、commit、构建时间与 Go 版本 | `gdit version` / `gdit --version` |
 | 查看命令总览 | `gdit --help` / `gdit help` |
 
 ## 2. 输出与退出码约定
@@ -148,6 +153,7 @@
 ├── engines/       # 已安装引擎资产，每个资产一个目录
 ├── sdks/          # 托管 .NET SDK 资产
 ├── templates/     # 已验证导出模板资产（不进入 state.toml）
+├── runtime/       # GUI 运行会话登记与跨进程锁；不保存项目路径、命令行或环境变量
 └── tmp/           # 下载/解压临时目录（中断残留自动清理）
 ```
 

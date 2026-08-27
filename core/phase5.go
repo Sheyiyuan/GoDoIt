@@ -404,7 +404,7 @@ func (m *Manager) AttachTemplate(ctx context.Context, name, source string) (Temp
 	}
 	info.References = append([]string(nil), instance.BuildReferences(items).Templates[id]...)
 	sort.Strings(info.References)
-	result.Instance = instanceToPublic(item, false)
+	result.Instance = instanceToPublic(m.root, item, false)
 	result.Template = &info
 	return result, nil
 }
@@ -444,7 +444,7 @@ func (m *Manager) DetachTemplate(ctx context.Context, name string) (TemplateBind
 	if err != nil {
 		return TemplateBindingResult{}, err
 	}
-	return TemplateBindingResult{Instance: instanceToPublic(item, false), Orphans: orphans}, nil
+	return TemplateBindingResult{Instance: instanceToPublic(m.root, item, false), Orphans: orphans}, nil
 }
 
 func normalizeTemplateRequest(version, edition string) (string, string, error) {

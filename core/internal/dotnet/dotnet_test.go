@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Sheyiyuan/GoDoIt/core/internal/platform"
@@ -43,6 +44,39 @@ func TestResolveArtifactRejectsNonHexChecksum(t *testing.T) {
 	})}
 	if _, err := ResolveArtifact(context.Background(), client, "8.0.410", platform.Target{OS: "linux", Arch: "amd64"}); err == nil {
 		t.Fatal("non-hex checksum must be rejected at metadata validation")
+	}
+}
+
+func TestResolveArtifactSelectsPortableArchive(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		target        platform.Target
+		rid           string
+		installerName string
+		archiveName   string
+	}{
+		{name: "macOS", target: platform.Target{OS: "darwin", Arch: "arm64"}, rid: "osx-arm64", installerName: "dotnet-sdk-osx-arm64.pkg", archiveName: "dotnet-sdk-osx-arm64.tar.gz"},
+		{name: "Windows", target: platform.Target{OS: "windows", Arch: "amd64"}, rid: "win-x64", installerName: "dotnet-sdk-win-x64.exe", archiveName: "dotnet-sdk-win-x64.zip"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			installerURL := "https://localhost/" + test.installerName
+			archiveURL := "https://localhost/" + test.archiveName
+			metadata := `{"releases":[{"sdk":{"version":"8.0.410","files":[` +
+				`{"name":"` + test.installerName + `","rid":"` + test.rid + `","url":"` + installerURL + `","hash":"` + strings.Repeat("a", 128) + `"},` +
+				`{"name":"` + test.archiveName + `","rid":"` + test.rid + `","url":"` + archiveURL + `","hash":"` + strings.Repeat("b", 128) + `"}` +
+				`]}}]}`
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewBufferString(metadata)), Request: request}, nil
+			})}
+
+			artifact, err := ResolveArtifact(context.Background(), client, "8.0.410", test.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Name != test.archiveName || artifact.URL != archiveURL || artifact.Hash != strings.Repeat("b", 128) {
+				t.Fatalf("portable archive was not selected: %+v", artifact)
+			}
+		})
 	}
 }
 

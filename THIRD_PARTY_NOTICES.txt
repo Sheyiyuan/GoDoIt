@@ -1,0 +1,231 @@
+GoDoIt Third-Party Notices
+Generated from repository lockfiles and scripts/third_party_licenses.json.
+
+== Go modules ==
+
+github.com/AlecAivazis/survey/v2 v2.3.7
+License: MIT
+Upstream: https://github.com/AlecAivazis/survey
+Copyright (c) 2018 Alec Aivazis
+
+github.com/BurntSushi/toml v1.4.0
+License: MIT
+Upstream: https://github.com/BurntSushi/toml
+Copyright (c) 2013 Andrew Gallant
+
+github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+License: MIT
+Upstream: https://github.com/kballard/go-shellquote
+Copyright (c) 2014 Kevin Ballard
+
+github.com/leaanthony/go-ansi-parser v1.6.1
+License: MIT
+Upstream: https://github.com/leaanthony/go-ansi-parser
+Copyright (c) 2021-Present Lea Anthony
+
+github.com/leaanthony/slicer v1.6.0
+License: MIT
+Upstream: https://github.com/leaanthony/slicer
+Copyright (c) 2019 Lea Anthony
+
+github.com/leaanthony/u v1.1.1
+License: MIT
+Upstream: https://github.com/leaanthony/u
+Copyright (c) 2023-Present Lea Anthony
+
+github.com/mattn/go-colorable v0.1.13
+License: MIT
+Upstream: https://github.com/mattn/go-colorable
+Copyright (c) 2016 Yasuhiro Matsumoto
+
+github.com/mattn/go-isatty v0.0.20
+License: MIT
+Upstream: https://github.com/mattn/go-isatty
+Copyright (c) Yasuhiro MATSUMOTO
+
+github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
+License: MIT
+Upstream: https://github.com/mgutz/ansi
+Copyright (c) 2013 Mario L. Gutierrez
+
+github.com/pkg/errors v0.9.1
+License: BSD-2-Clause
+Upstream: https://github.com/pkg/errors
+Copyright (c) 2015, Dave Cheney
+
+github.com/rivo/uniseg v0.4.7
+License: MIT
+Upstream: https://github.com/rivo/uniseg
+Copyright (c) 2019 Oliver Kuederle
+
+github.com/wailsapp/go-webview2 v1.0.22
+License: MIT
+Upstream: https://github.com/wailsapp/go-webview2
+Copyright (c) 2020 John Chadwick; portions Copyright (c) 2017 Serge Zaitsev
+
+github.com/wailsapp/wails/v2 v2.11.0
+License: MIT
+Upstream: https://github.com/wailsapp/wails
+Copyright (c) 2018-Present Lea Anthony
+
+golang.org/x/sys v0.46.0
+License: BSD-3-Clause
+Upstream: https://go.googlesource.com/sys
+Copyright 2009 The Go Authors
+
+golang.org/x/term v0.44.0
+License: BSD-3-Clause
+Upstream: https://go.googlesource.com/term
+Copyright 2009 The Go Authors
+
+golang.org/x/text v0.39.0
+License: BSD-3-Clause
+Upstream: https://go.googlesource.com/text
+Copyright 2009 The Go Authors
+
+== npm packages ==
+
+@remix-run/router 1.23.4
+License: MIT
+Upstream: https://github.com/remix-run/react-router
+Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021
+
+js-tokens 4.0.0
+License: MIT
+Upstream: https://github.com/lydell/js-tokens
+Copyright (c) 2014, 2015, 2016, 2017, 2018 Simon Lydell
+
+loose-envify 1.4.0
+License: MIT
+Upstream: https://github.com/zertosh/loose-envify
+Copyright (c) 2015 Andres Suarez
+
+lucide-react 0.468.0
+License: ISC
+Upstream: https://github.com/lucide-icons/lucide
+Copyright (c) 2020, Lucide Contributors
+
+react 18.3.1
+License: MIT
+Upstream: https://github.com/facebook/react
+Copyright (c) Meta Platforms, Inc. and affiliates
+
+react-dom 18.3.1
+License: MIT
+Upstream: https://github.com/facebook/react
+Copyright (c) Meta Platforms, Inc. and affiliates
+
+react-router 6.30.6
+License: MIT
+Upstream: https://github.com/remix-run/react-router
+Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021
+
+react-router-dom 6.30.6
+License: MIT
+Upstream: https://github.com/remix-run/react-router
+Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021
+
+scheduler 0.23.2
+License: MIT
+Upstream: https://github.com/facebook/react
+Copyright (c) Meta Platforms, Inc. and affiliates
+
+zustand 5.0.15
+License: MIT
+Upstream: https://github.com/pmndrs/zustand
+Copyright (c) 2019 Paul Henschel
+
+== Brand assets ==
+
+Godot Engine logo current brand asset
+License: CC-BY-3.0
+Upstream: https://godotengine.org/press/
+Copyright (c) Godot Engine contributors
+Godot and the Godot logo are trademarks of the Godot Foundation. The logo is used under Creative Commons Attribution 3.0.
+
+Microsoft C# logo current brand asset
+License: LicenseRef-Microsoft-Trademark
+Upstream: https://learn.microsoft.com/dotnet/csharp/
+Copyright (c) Microsoft Corporation
+C# and the C# logo are trademarks of Microsoft Corporation. Their inclusion does not imply endorsement by Microsoft.
+
+== License texts ==
+
+-- BSD-2-Clause --
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+-- BSD-3-Clause --
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+-- ISC --
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+-- MIT --
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

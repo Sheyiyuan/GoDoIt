@@ -3,7 +3,7 @@ title: 第一次安装并启动 Godot
 description: 查看可用版本，创建条目，然后启动编辑器。
 section: tutorials
 order: 1
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
 这篇教程带你跑通最短的一条路径。你会查看可用版本，创建一个名为 `work` 的条目，然后启动它引用的 Godot 编辑器。条目和资产的关系留到后面的解释文章再讲。
@@ -11,10 +11,10 @@ updated: 2026-08-25
 ## 前提
 
 - Linux amd64、macOS arm64 或 Windows x86_64 的受支持环境
-- 已经把当前开发版 `gdit` 放进 PATH
+- 已经安装当前开发版 `gdit`，或在解压后的发行目录中运行命令
 
-GoDoIt 当前为 v0.2 第四阶段发布候选，仓库暂未提供正式的二进制安装流程。本页从 `gdit` 命令
-可用以后开始；第五阶段的 `suggest` 和导出模板命令仍在设计中，不影响本教程。
+还没有 GoDoIt 时，先按 [安装 GoDoIt 发行包](/wiki/how-to/install-godoit/) 下载并校验当前平台归档。
+本页从 `gdit` 命令可用以后开始；GUI、`suggest` 和导出模板不影响这条最短 CLI 流程。
 
 ## 1. 看看能装什么
 

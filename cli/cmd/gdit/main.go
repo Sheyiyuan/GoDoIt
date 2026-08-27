@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	gdit "github.com/Sheyiyuan/GoDoIt/core"
+	"github.com/Sheyiyuan/GoDoIt/core/buildinfo"
 )
 
 type managerAPI interface {
@@ -62,6 +63,7 @@ type templateAPI interface {
 
 var stdinIsTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 var stdoutIsTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+var resolveGUIExecutable = findGUIExecutable
 
 var askInteractive = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
 	return survey.AskOne(prompt, response, append(opts, survey.WithStdio(os.Stdin, os.Stderr, os.Stderr))...)
@@ -107,6 +109,88 @@ var spawnProcess = func(executable string, engineArgs, environment []string, std
 	return 1
 }
 
+// findGUIExecutable 按约定顺序查找与 CLI 配套的桌面 GUI 可执行文件。
+func findGUIExecutable() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("GDIT_GUI")); configured != "" {
+		executable, err := resolveGUIPath(configured)
+		if err != nil {
+			return "", fmt.Errorf("GDIT_GUI 指向不可用的 GUI 可执行文件 %q: %w", configured, err)
+		}
+		return executable, nil
+	}
+
+	var candidates []string
+	if executable, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executable)
+		candidates = append(candidates, guiExecutableCandidates(executableDir)...)
+		candidates = append(candidates, guiExecutableCandidates(filepath.Join(executableDir, "..", "gui", "build", "bin"))...)
+	}
+	if workingDir, err := os.Getwd(); err == nil {
+		candidates = append(candidates, guiExecutableCandidates(filepath.Join(workingDir, "gui", "build", "bin"))...)
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if executable, err := resolveGUIPath(candidate); err == nil {
+			return executable, nil
+		}
+	}
+	for _, name := range []string{"gdit-gui", "gdit-gui.exe"} {
+		candidate, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		if executable, err := resolveGUIPath(candidate); err == nil {
+			return executable, nil
+		}
+	}
+	return "", errors.New(`找不到 gdit-gui；请先运行 "make build-gui" 或设置 GDIT_GUI`)
+}
+
+func guiExecutableCandidates(directory string) []string {
+	return []string{
+		filepath.Join(directory, "gdit-gui"),
+		filepath.Join(directory, "gdit-gui.exe"),
+		filepath.Join(directory, "GoDoIt.app", "Contents", "MacOS", "gdit-gui"),
+	}
+}
+
+func resolveGUIPath(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode().IsRegular() {
+		return path, nil
+	}
+	if info.IsDir() && strings.HasSuffix(strings.ToLower(filepath.Clean(path)), ".app") {
+		appExecutable := filepath.Join(path, "Contents", "MacOS", "gdit-gui")
+		appInfo, err := os.Stat(appExecutable)
+		if err != nil {
+			return "", err
+		}
+		if appInfo.Mode().IsRegular() {
+			return appExecutable, nil
+		}
+	}
+	return "", fmt.Errorf("路径不是可执行文件")
+}
+
+// runGUI 启动桌面 GUI，并把 GUI 参数和退出码原样交给调用方。
+func runGUI(args []string, stdout, stderr io.Writer) int {
+	executable, err := resolveGUIExecutable()
+	if err != nil {
+		writeError(stderr, err)
+		return 1
+	}
+	return spawnProcess(executable, args, nil, stdout, stderr)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -114,6 +198,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		writeVersion(stdout)
+		return 0
+	}
 	root, err := gdit.DefaultRoot()
 	if err != nil {
 		writeError(stderr, err)
@@ -151,6 +239,8 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return runRemoveInstance(ctx, args[1:], stdout, stderr, manager)
 	case "run", "r":
 		return runRun(ctx, args[1:], stdout, stderr, manager)
+	case "gui":
+		return runGUI(args[1:], stdout, stderr)
 	case "engine":
 		return runEngine(ctx, args[1:], stdout, stderr, manager, renderer)
 	case "sdk":
@@ -171,6 +261,12 @@ func runWithManager(ctx context.Context, root string, args []string, stdout, std
 		return runSetup(ctx, root, args[1:], stdout, stderr, manager)
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout, stderr, manager)
+	case "version", "--version":
+		if len(args) != 1 {
+			return usage(stderr, "gdit version")
+		}
+		writeVersion(stdout)
+		return 0
 	case "help", "h", "-h", "--help":
 		writeUsage(stdout)
 		return 0
@@ -1452,7 +1548,7 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (handled, 
 
 func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "usage: gdit <command> [options]")
-	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), engine, sdk, template, suggest, env (e), autoremove, source (s), available (a), setup (st), doctor")
+	fmt.Fprintln(writer, "commands: install (i), new, list (l), default (d), remove (rm), run (r), gui, engine, sdk, template, suggest, env (e), autoremove, source (s), available (a), setup (st), doctor, version")
 	fmt.Fprintln(writer, "  install <name> --version <version> [--edition standard|dotnet] [--sdk managed|system] [--sdk-version <version>] [--current|--no-current] [--template]")
 	fmt.Fprintln(writer, "  engine [list] | install [options] <version>... | remove [-y] <version>")
 	fmt.Fprintln(writer, "  sdk [list] | available | install <version> | remove [-y] <version>")
@@ -1461,5 +1557,19 @@ func writeUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  env [--instance <name>] | set <KEY=VALUE> [--instance <name>] | unset <KEY> [--instance <name>]")
 	fmt.Fprintln(writer, "  autoremove [-y|--yes]")
 	fmt.Fprintln(writer, "  run [<name>|-d] [-- <engine args>]")
+	fmt.Fprintln(writer, "  gui [arguments]")
 	fmt.Fprintln(writer, "  doctor [--network] [--verbose]")
+	fmt.Fprintln(writer, "  version")
+}
+
+func writeVersion(writer io.Writer) {
+	info := buildinfo.Read()
+	fmt.Fprintf(writer, "gdit %s\n", info.Version)
+	if info.Commit != "" {
+		fmt.Fprintf(writer, "commit %s\n", info.Commit)
+	}
+	if info.BuildDate != "" {
+		fmt.Fprintf(writer, "built %s\n", info.BuildDate)
+	}
+	fmt.Fprintf(writer, "go %s\n", info.GoVersion)
 }

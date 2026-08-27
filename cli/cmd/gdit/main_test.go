@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,6 +163,13 @@ func TestInstallParsesEntryFlagsAfterName(t *testing.T) {
 	}
 }
 
+func TestVersionUsesSharedBuildInfo(t *testing.T) {
+	stdout, stderr, code := runCommand(t, fakeManager{}, "version")
+	if code != 0 || stderr != "" || !strings.HasPrefix(stdout, "gdit dev\n") || !strings.Contains(stdout, "\ngo go") {
+		t.Fatalf("unexpected version output: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestInstallCurrentFlagsAreMutuallyExclusive(t *testing.T) {
 	_, _, code := runCommand(t, fakeManager{}, "install", "work", "--version", "4.5.2", "--current", "--no-current")
 	if code != 2 {
@@ -309,6 +317,65 @@ func TestRunWithoutArgsTTYNoInstancesGivesHint(t *testing.T) {
 	_, stderr, code := runCommand(t, fakeManager{}, "run")
 	if code != 1 || !strings.Contains(stderr, `gdit install`) {
 		t.Fatalf("expected an install hint for zero instances: code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestGUIForwardsArgumentsAndExitCode(t *testing.T) {
+	originalResolver := resolveGUIExecutable
+	originalSpawn := spawnProcess
+	defer func() {
+		resolveGUIExecutable = originalResolver
+		spawnProcess = originalSpawn
+	}()
+	resolveGUIExecutable = func() (string, error) { return "/tmp/gdit-gui", nil }
+	var gotExecutable string
+	var gotArgs []string
+	var gotEnvironment []string
+	spawnProcess = func(executable string, args, environment []string, _, _ io.Writer) int {
+		gotExecutable = executable
+		gotArgs = append([]string(nil), args...)
+		gotEnvironment = append([]string(nil), environment...)
+		return 23
+	}
+
+	_, stderr, code := runCommand(t, fakeManager{}, "gui", "--test-arg", "value")
+	if code != 23 || stderr != "" {
+		t.Fatalf("unexpected GUI result: code=%d stderr=%q", code, stderr)
+	}
+	if gotExecutable != "/tmp/gdit-gui" || !reflect.DeepEqual(gotArgs, []string{"--test-arg", "value"}) || gotEnvironment != nil {
+		t.Fatalf("unexpected GUI launch: executable=%q args=%v environment=%v", gotExecutable, gotArgs, gotEnvironment)
+	}
+}
+
+func TestGUIReportsMissingExecutable(t *testing.T) {
+	originalResolver := resolveGUIExecutable
+	defer func() { resolveGUIExecutable = originalResolver }()
+	resolveGUIExecutable = func() (string, error) { return "", errors.New("GUI not found") }
+
+	_, stderr, code := runCommand(t, fakeManager{}, "gui")
+	if code != 1 || !strings.Contains(stderr, "GUI not found") {
+		t.Fatalf("unexpected missing GUI result: code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestFindGUIExecutableUsesConfiguredPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gdit-gui")
+	if err := os.WriteFile(path, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GDIT_GUI", path)
+
+	got, err := findGUIExecutable()
+	if err != nil || got != path {
+		t.Fatalf("unexpected configured GUI path: got=%q err=%v", got, err)
+	}
+}
+
+func TestGUIExecutableCandidatesIncludeReleaseAppBundle(t *testing.T) {
+	directory := filepath.Join("release", "GoDoIt_0.2.0_darwin_arm64")
+	want := filepath.Join(directory, "GoDoIt.app", "Contents", "MacOS", "gdit-gui")
+	if candidates := guiExecutableCandidates(directory); !slices.Contains(candidates, want) {
+		t.Fatalf("macOS 发布应用候选缺少 %q：%v", want, candidates)
 	}
 }
 

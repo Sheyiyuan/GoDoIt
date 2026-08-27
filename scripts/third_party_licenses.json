@@ -1,0 +1,208 @@
+{
+  "go": [
+    {
+      "name": "github.com/AlecAivazis/survey/v2",
+      "version": "v2.3.7",
+      "license": "MIT",
+      "upstream": "https://github.com/AlecAivazis/survey",
+      "copyright": "Copyright (c) 2018 Alec Aivazis"
+    },
+    {
+      "name": "github.com/BurntSushi/toml",
+      "version": "v1.4.0",
+      "license": "MIT",
+      "upstream": "https://github.com/BurntSushi/toml",
+      "copyright": "Copyright (c) 2013 Andrew Gallant"
+    },
+    {
+      "name": "github.com/kballard/go-shellquote",
+      "version": "v0.0.0-20180428030007-95032a82bc51",
+      "license": "MIT",
+      "upstream": "https://github.com/kballard/go-shellquote",
+      "copyright": "Copyright (c) 2014 Kevin Ballard"
+    },
+    {
+      "name": "github.com/leaanthony/go-ansi-parser",
+      "version": "v1.6.1",
+      "license": "MIT",
+      "upstream": "https://github.com/leaanthony/go-ansi-parser",
+      "copyright": "Copyright (c) 2021-Present Lea Anthony"
+    },
+    {
+      "name": "github.com/leaanthony/slicer",
+      "version": "v1.6.0",
+      "license": "MIT",
+      "upstream": "https://github.com/leaanthony/slicer",
+      "copyright": "Copyright (c) 2019 Lea Anthony"
+    },
+    {
+      "name": "github.com/leaanthony/u",
+      "version": "v1.1.1",
+      "license": "MIT",
+      "upstream": "https://github.com/leaanthony/u",
+      "copyright": "Copyright (c) 2023-Present Lea Anthony"
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "v0.1.13",
+      "license": "MIT",
+      "upstream": "https://github.com/mattn/go-colorable",
+      "copyright": "Copyright (c) 2016 Yasuhiro Matsumoto"
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "v0.0.20",
+      "license": "MIT",
+      "upstream": "https://github.com/mattn/go-isatty",
+      "copyright": "Copyright (c) Yasuhiro MATSUMOTO"
+    },
+    {
+      "name": "github.com/mgutz/ansi",
+      "version": "v0.0.0-20170206155736-9520e82c474b",
+      "license": "MIT",
+      "upstream": "https://github.com/mgutz/ansi",
+      "copyright": "Copyright (c) 2013 Mario L. Gutierrez"
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "v0.9.1",
+      "license": "BSD-2-Clause",
+      "upstream": "https://github.com/pkg/errors",
+      "copyright": "Copyright (c) 2015, Dave Cheney"
+    },
+    {
+      "name": "github.com/rivo/uniseg",
+      "version": "v0.4.7",
+      "license": "MIT",
+      "upstream": "https://github.com/rivo/uniseg",
+      "copyright": "Copyright (c) 2019 Oliver Kuederle"
+    },
+    {
+      "name": "github.com/wailsapp/go-webview2",
+      "version": "v1.0.22",
+      "license": "MIT",
+      "upstream": "https://github.com/wailsapp/go-webview2",
+      "copyright": "Copyright (c) 2020 John Chadwick; portions Copyright (c) 2017 Serge Zaitsev"
+    },
+    {
+      "name": "github.com/wailsapp/wails/v2",
+      "version": "v2.11.0",
+      "license": "MIT",
+      "upstream": "https://github.com/wailsapp/wails",
+      "copyright": "Copyright (c) 2018-Present Lea Anthony"
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "v0.46.0",
+      "license": "BSD-3-Clause",
+      "upstream": "https://go.googlesource.com/sys",
+      "copyright": "Copyright 2009 The Go Authors"
+    },
+    {
+      "name": "golang.org/x/term",
+      "version": "v0.44.0",
+      "license": "BSD-3-Clause",
+      "upstream": "https://go.googlesource.com/term",
+      "copyright": "Copyright 2009 The Go Authors"
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "v0.39.0",
+      "license": "BSD-3-Clause",
+      "upstream": "https://go.googlesource.com/text",
+      "copyright": "Copyright 2009 The Go Authors"
+    }
+  ],
+  "npm": [
+    {
+      "name": "@remix-run/router",
+      "version": "1.23.4",
+      "license": "MIT",
+      "upstream": "https://github.com/remix-run/react-router",
+      "copyright": "Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021"
+    },
+    {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "license": "MIT",
+      "upstream": "https://github.com/lydell/js-tokens",
+      "copyright": "Copyright (c) 2014, 2015, 2016, 2017, 2018 Simon Lydell"
+    },
+    {
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "license": "MIT",
+      "upstream": "https://github.com/zertosh/loose-envify",
+      "copyright": "Copyright (c) 2015 Andres Suarez"
+    },
+    {
+      "name": "lucide-react",
+      "version": "0.468.0",
+      "license": "ISC",
+      "upstream": "https://github.com/lucide-icons/lucide",
+      "copyright": "Copyright (c) 2020, Lucide Contributors"
+    },
+    {
+      "name": "react",
+      "version": "18.3.1",
+      "license": "MIT",
+      "upstream": "https://github.com/facebook/react",
+      "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates"
+    },
+    {
+      "name": "react-dom",
+      "version": "18.3.1",
+      "license": "MIT",
+      "upstream": "https://github.com/facebook/react",
+      "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates"
+    },
+    {
+      "name": "react-router",
+      "version": "6.30.6",
+      "license": "MIT",
+      "upstream": "https://github.com/remix-run/react-router",
+      "copyright": "Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021"
+    },
+    {
+      "name": "react-router-dom",
+      "version": "6.30.6",
+      "license": "MIT",
+      "upstream": "https://github.com/remix-run/react-router",
+      "copyright": "Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021"
+    },
+    {
+      "name": "scheduler",
+      "version": "0.23.2",
+      "license": "MIT",
+      "upstream": "https://github.com/facebook/react",
+      "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates"
+    },
+    {
+      "name": "zustand",
+      "version": "5.0.15",
+      "license": "MIT",
+      "upstream": "https://github.com/pmndrs/zustand",
+      "copyright": "Copyright (c) 2019 Paul Henschel"
+    }
+  ],
+  "assets": [
+    {
+      "name": "Godot Engine logo",
+      "version": "current brand asset",
+      "license": "CC-BY-3.0",
+      "upstream": "https://godotengine.org/press/",
+      "copyright": "Copyright (c) Godot Engine contributors",
+      "path": "gui/frontend/public/brand/godot.svg",
+      "notice": "Godot and the Godot logo are trademarks of the Godot Foundation. The logo is used under Creative Commons Attribution 3.0."
+    },
+    {
+      "name": "Microsoft C# logo",
+      "version": "current brand asset",
+      "license": "LicenseRef-Microsoft-Trademark",
+      "upstream": "https://learn.microsoft.com/dotnet/csharp/",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "path": "gui/frontend/public/brand/csharp.svg",
+      "notice": "C# and the C# logo are trademarks of Microsoft Corporation. Their inclusion does not imply endorsement by Microsoft."
+    }
+  ]
+}

@@ -24,8 +24,23 @@ import (
 // SchemaVersion 是当前条目文件 schema 版本（v2：id 存储标识 + name 显示名分离）。
 const SchemaVersion = 2
 
+const (
+	// IconDefault 表示按 edition 解析内置图标。
+	IconDefault = "default"
+	// IconGodot 表示固定使用 Godot 图标。
+	IconGodot = "godot"
+	// IconCSharp 表示固定使用 C# 图标。
+	IconCSharp = "csharp"
+	// IconMascot 表示固定使用 GoDoIt 吉祥物图标。
+	IconMascot = "mascot"
+	// IconCustom 表示使用 icons/<uuid>.png 自定义图标。
+	IconCustom = "custom"
+)
+
 // uuidPattern 是条目存储标识符（UUID v4，小写十六进制）的格式。
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+var iconBackgroundPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)
 
 // Engine 描述条目引用的引擎资产。
 type Engine struct {
@@ -44,6 +59,13 @@ type Template struct {
 	ID string `toml:"id"`
 }
 
+// Appearance 描述条目的 GUI 图标策略。
+type Appearance struct {
+	Icon       string `toml:"icon"`
+	CustomIcon string `toml:"custom_icon,omitempty"`
+	Background string `toml:"background,omitempty"`
+}
+
 // File 是 instances/<uuid>.toml 的结构。
 type File struct {
 	SchemaVersion int               `toml:"schema_version"`
@@ -52,6 +74,7 @@ type File struct {
 	Engine        Engine            `toml:"engine"`
 	Dotnet        *Dotnet           `toml:"dotnet,omitempty"`
 	Template      *Template         `toml:"template,omitempty"`
+	Appearance    *Appearance       `toml:"appearance,omitempty"`
 	Env           map[string]string `toml:"env,omitempty"`
 }
 
@@ -158,6 +181,9 @@ func Validate(item *File, filename string) error {
 			return fmt.Errorf("template id %q must match engine %q", item.Template.ID, expected)
 		}
 	}
+	if err := validateAppearance(item); err != nil {
+		return err
+	}
 	for key, value := range item.Env {
 		if err := config.ValidateEnvironmentVariable(key, value); err != nil {
 			return fmt.Errorf("invalid environment variable %q: %w", key, err)
@@ -172,6 +198,65 @@ func Validate(item *File, filename string) error {
 		seenEnvironmentKeys[normalized] = key
 	}
 	return nil
+}
+
+func validateAppearance(item *File) error {
+	if item.Appearance == nil {
+		return nil
+	}
+	if item.Appearance.Icon == "" {
+		item.Appearance.Icon = IconDefault
+	}
+	switch item.Appearance.Icon {
+	case IconDefault, IconGodot, IconCSharp, IconMascot:
+		if item.Appearance.CustomIcon != "" {
+			return errors.New("custom_icon is only valid for custom icon strategy")
+		}
+	case IconCustom:
+		expected := item.ID + ".png"
+		if item.Appearance.CustomIcon != expected {
+			return fmt.Errorf("custom_icon %q must be %q", item.Appearance.CustomIcon, expected)
+		}
+	default:
+		return fmt.Errorf("unsupported instance icon strategy %q", item.Appearance.Icon)
+	}
+	if !ValidIconBackground(item.Appearance.Background) {
+		return fmt.Errorf("invalid icon background %q", item.Appearance.Background)
+	}
+	return nil
+}
+
+// ValidIconBackground 报告背景色是否为空（透明）或合法的十六进制 CSS 颜色。
+func ValidIconBackground(background string) bool {
+	return background == "" || iconBackgroundPattern.MatchString(background)
+}
+
+// IconStrategy 返回条目保存的图标策略；旧条目按 default 处理。
+func IconStrategy(item File) string {
+	if item.Appearance == nil || item.Appearance.Icon == "" {
+		return IconDefault
+	}
+	return item.Appearance.Icon
+}
+
+// ResolvedIcon 返回条目实际应展示的内置图标；custom 原样返回，缺失回退由调用方检查文件后处理。
+func ResolvedIcon(item File) string {
+	strategy := IconStrategy(item)
+	if strategy != IconDefault {
+		return strategy
+	}
+	if item.Engine.Edition == "dotnet" {
+		return IconCSharp
+	}
+	return IconGodot
+}
+
+// IconBackground 返回条目图标背景色；旧条目和空值按透明处理。
+func IconBackground(item File) string {
+	if item.Appearance == nil {
+		return ""
+	}
+	return item.Appearance.Background
 }
 
 func isGodot3(version string) bool {
@@ -399,6 +484,45 @@ func SetTemplate(root, id, templateID string) error {
 	return store.WriteTOMLAtomic(path, content)
 }
 
+// SetAppearance 原子设置条目图标策略与背景色，并保留条目中的未知字段。
+func SetAppearance(root, id, icon, background string) error {
+	item, err := Read(root, id)
+	if err != nil {
+		return err
+	}
+	appearance := &Appearance{Icon: icon, Background: background}
+	if icon == IconCustom {
+		appearance.CustomIcon = id + ".png"
+	}
+	item.Appearance = appearance
+	if err := validateAppearance(&item); err != nil {
+		return err
+	}
+	path := Path(root, id)
+	content := make(map[string]any)
+	if _, err := toml.DecodeFile(path, &content); err != nil {
+		return err
+	}
+	appearanceMap := make(map[string]any)
+	if existing, ok := content["appearance"].(map[string]any); ok {
+		for key, value := range existing {
+			appearanceMap[key] = value
+		}
+	}
+	appearanceMap["icon"] = appearance.Icon
+	delete(appearanceMap, "custom_icon")
+	if appearance.CustomIcon != "" {
+		appearanceMap["custom_icon"] = appearance.CustomIcon
+	}
+	if appearance.Background != "" {
+		appearanceMap["background"] = appearance.Background
+	} else {
+		delete(appearanceMap, "background")
+	}
+	content["appearance"] = appearanceMap
+	return store.WriteTOMLAtomic(path, content)
+}
+
 // Remove 删除条目文件并同步 instances 目录。
 func Remove(root, id string) error {
 	if !ValidID(id) {
@@ -407,5 +531,15 @@ func Remove(root, id string) error {
 	if err := os.Remove(Path(root, id)); err != nil {
 		return err
 	}
-	return store.SyncDirectory(filepath.Join(root, "instances"))
+	if err := store.SyncDirectory(filepath.Join(root, "instances")); err != nil {
+		return err
+	}
+	icon := filepath.Join(root, "icons", id+".png")
+	if err := os.Remove(icon); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove custom icon: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "icons")); err == nil {
+		return store.SyncDirectory(filepath.Join(root, "icons"))
+	}
+	return nil
 }

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "GoDoIt",
+  "outputfilename": "gdit-gui",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Sheyiyuan",
+    "email": "sheyiyuantan90@qq.com"
+  },
+  "info": {
+    "companyName": "Sheyiyuan",
+    "productName": "GoDoIt",
+    "productVersion": "0.2.0",
+    "copyright": "Copyright 2026 Sheyiyuan",
+    "comments": "Godot engine launcher and version manager"
+  }
+}

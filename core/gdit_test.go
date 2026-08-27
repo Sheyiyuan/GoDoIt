@@ -29,6 +29,59 @@ type fixtureSource struct {
 	resolve  atomic.Int64
 }
 
+func TestGUISettingsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	manager, err := New(Options{RootDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := manager.GUISettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitlebarStyle != config.DefaultTitlebarStyle {
+		t.Fatalf("unexpected default GUI settings: %+v", settings)
+	}
+	if err := manager.SetGUISettings(context.Background(), GUISettings{TitlebarStyle: config.TitlebarStyleMac}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = manager.GUISettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TitlebarStyle != config.TitlebarStyleMac {
+		t.Fatalf("GUI settings did not persist: %+v", settings)
+	}
+	if err := manager.SetGUISettings(context.Background(), GUISettings{TitlebarStyle: "invalid"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid GUI setting error, got %v", err)
+	}
+}
+
+func TestInitializeCreatesStandardLayoutWithoutIntegration(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "gdit")
+	manager, err := New(Options{RootDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"engines", "sdks", "templates", "instances", "tmp", "icons", "bin", "cache"} {
+		info, statErr := os.Stat(filepath.Join(root, name))
+		if statErr != nil || !info.IsDir() {
+			t.Fatalf("expected initialized directory %s: %v", name, statErr)
+		}
+	}
+	for _, name := range []string{"current", filepath.Join("bin", "godot"), filepath.Join("bin", "godot.cmd")} {
+		if _, statErr := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(statErr) {
+			t.Fatalf("initialize created integration path %s: %v", name, statErr)
+		}
+	}
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatalf("initialize should be idempotent: %v", err)
+	}
+}
+
 func (s *fixtureSource) Name() string { return s.name }
 
 func (s *fixtureSource) Resolve(_ context.Context, request SourceRequest) (Artifact, error) {

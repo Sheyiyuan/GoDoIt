@@ -90,13 +90,19 @@ func (s *Store) Init() error {
 	if err := os.MkdirAll(s.Root, 0o700); err != nil {
 		return fmt.Errorf("create store root: %w", err)
 	}
-	for _, path := range []string{s.EnginesDir(), s.SDKsDir(), s.TemplatesDir(), s.InstancesDir(), s.TmpDir()} {
+	for _, path := range []string{s.EnginesDir(), s.SDKsDir(), s.TemplatesDir(), s.InstancesDir(), s.TmpDir(), s.IconsDir(), s.BinDir(), s.CacheDir()} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create store directory: %w", err)
 		}
 	}
 	return nil
 }
+
+// IconsDir 返回条目自定义图标目录。
+func (s *Store) IconsDir() string { return filepath.Join(s.Root, "icons") }
+
+// CacheDir 返回下载缓存目录。
+func (s *Store) CacheDir() string { return filepath.Join(s.Root, "cache") }
 
 // EnginesDir 返回已发布引擎资产目录。
 func (s *Store) EnginesDir() string { return filepath.Join(s.Root, "engines") }
@@ -124,6 +130,15 @@ func (s *Store) StatePath() string { return filepath.Join(s.Root, "state.toml") 
 
 // LockPath 返回全局修改锁路径。
 func (s *Store) LockPath() string { return filepath.Join(s.Root, ".lock") }
+
+// RuntimeDir 返回 GUI 运行时管理目录。
+func (s *Store) RuntimeDir() string { return filepath.Join(s.Root, "runtime") }
+
+// SessionsDir 返回 GUI 运行会话记录目录。
+func (s *Store) SessionsDir() string { return filepath.Join(s.RuntimeDir(), "sessions") }
+
+// RuntimeLockPath 返回 GUI 运行会话专用锁路径。
+func (s *Store) RuntimeLockPath() string { return filepath.Join(s.RuntimeDir(), ".lock") }
 
 // CurrentPath 返回当前条目 symlink 路径。
 func (s *Store) CurrentPath() string { return filepath.Join(s.Root, "current") }

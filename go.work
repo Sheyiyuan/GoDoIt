@@ -3,4 +3,5 @@ go 1.25.13
 use (
 	./core
 	./cli
+	./gui
 )
