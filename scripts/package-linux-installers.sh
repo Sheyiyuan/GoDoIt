@@ -55,7 +55,7 @@ GoDoIt Godot engine launcher and version manager.
 
 %install
 mkdir -p %{buildroot}
-cp -a $stage/rpm/root/* %{buildroot}/
+cp -a $stage/rpm/root/. %{buildroot}/
 
 %files
 /usr/bin/gdit
@@ -64,5 +64,5 @@ cp -a $stage/rpm/root/* %{buildroot}/
 /usr/share/doc/godoit/LICENSE
 /usr/share/doc/godoit/THIRD_PARTY_NOTICES.txt
 EOF
-rpmbuild --define "_topdir $stage/rpm" --define "_buildrootdir $stage/rpm/root" -bb "$stage/rpm/SPECS/godoit.spec" >/dev/null
+rpmbuild --define "_topdir $stage/rpm" -bb "$stage/rpm/SPECS/godoit.spec" >/dev/null
 cp "$stage/rpm/RPMS/x86_64/"*.rpm "$output/GoDoIt_${version}_linux_amd64.rpm"
