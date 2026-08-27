@@ -11,7 +11,7 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 
 mkdir -p "$stage/deb/DEBIAN" "$stage/deb/usr/bin" "$stage/deb/usr/share/applications" "$stage/deb/usr/share/doc/$name"
 cp "$root/bin/gdit" "$stage/deb/usr/bin/gdit"
-cp "$root/bin/gdit-gui" "$stage/deb/usr/bin/gdit-gui"
+cp "$root/project/gui/build/bin/gdit-gui" "$stage/deb/usr/bin/gdit-gui"
 cp LICENSE THIRD_PARTY_NOTICES.txt "$stage/deb/usr/share/doc/$name/"
 chmod 755 "$stage/deb/usr/bin/gdit" "$stage/deb/usr/bin/gdit-gui"
 cat > "$stage/deb/DEBIAN/control" <<EOF
@@ -37,7 +37,7 @@ dpkg-deb --build --root-owner-group "$stage/deb" "$output/GoDoIt_${version}_linu
 mkdir -p "$stage/rpm/BUILD" "$stage/rpm/RPMS" "$stage/rpm/SOURCES" "$stage/rpm/SPECS" "$stage/rpm/SRPMS"
 mkdir -p "$stage/rpm/root/usr/bin" "$stage/rpm/root/usr/share/applications" "$stage/rpm/root/usr/share/doc/$name"
 cp "$root/bin/gdit" "$stage/rpm/root/usr/bin/gdit"
-cp "$root/bin/gdit-gui" "$stage/rpm/root/usr/bin/gdit-gui"
+cp "$root/project/gui/build/bin/gdit-gui" "$stage/rpm/root/usr/bin/gdit-gui"
 cp LICENSE THIRD_PARTY_NOTICES.txt "$stage/rpm/root/usr/share/doc/$name/"
 cp "$stage/deb/usr/share/applications/godoit.desktop" "$stage/rpm/root/usr/share/applications/"
 chmod 755 "$stage/rpm/root/usr/bin/gdit" "$stage/rpm/root/usr/bin/gdit-gui"
