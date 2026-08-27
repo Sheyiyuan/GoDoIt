@@ -311,7 +311,7 @@ func rejectWorkspacePath(filename, root string) error {
 	return nil
 }
 
-// WriteChecksums 对精确的三个平台归档生成 GNU sha256sum 兼容清单。
+// WriteChecksums 对三个平台归档和四个安装产物生成 GNU sha256sum 兼容清单。
 func WriteChecksums(directory, version string) error {
 	expected, err := expectedArchiveNames(version)
 	if err != nil {
@@ -405,6 +405,13 @@ func expectedArchiveNames(version string) ([]string, error) {
 		}
 		result = append(result, name)
 	}
+	sort.Strings(result)
+	result = append(result,
+		fmt.Sprintf("GoDoIt_%s_linux_amd64.deb", version),
+		fmt.Sprintf("GoDoIt_%s_linux_amd64.rpm", version),
+		fmt.Sprintf("GoDoIt_%s_windows_amd64_setup.exe", version),
+		fmt.Sprintf("GoDoIt_%s_darwin_arm64.dmg", version),
+	)
 	sort.Strings(result)
 	return result, nil
 }

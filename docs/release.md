@@ -14,12 +14,16 @@
 
 ## 发布资产
 
-最终 GitHub Release 只能包含下面四个文件：
+最终 GitHub Release 包含三个平台归档、四个安装包和校验清单：
 
 ```text
 GoDoIt_<version>_linux_amd64.tar.gz
 GoDoIt_<version>_darwin_arm64.zip
 GoDoIt_<version>_windows_amd64.zip
+GoDoIt_<version>_windows_amd64_setup.exe
+GoDoIt_<version>_linux_amd64.deb
+GoDoIt_<version>_linux_amd64.rpm
+GoDoIt_<version>_darwin_arm64.dmg
 SHA256SUMS
 ```
 
@@ -57,7 +61,7 @@ macOS 与 Windows 必须分别在原生 arm64、amd64 环境运行 `make package
 1. 使用 Go 1.25.13 运行质量和发布身份门禁。
 2. 在 Linux amd64、macOS arm64、Windows amd64 原生 runner 并行测试和打包。
 3. 上传仅供本次 workflow 使用的不可修改中间 artifacts。
-4. 汇总三个归档，生成并复验 `SHA256SUMS` 和最终文件白名单。
+4. 汇总三个归档和四个安装包，生成并复验 `SHA256SUMS` 和最终文件白名单。
 5. 所有步骤成功后，删除旧 `dev-latest` Release/tag 并创建新的 prerelease。
 
 任一前置 job 失败时，已有 `dev-latest` 保持不变。开发版说明会记录完整来源 commit，并明确标注
@@ -78,7 +82,7 @@ workflow 会验证 tag 名、`VERSION` 和当前检出 commit。若同名 GitHub
 
 ## 发布后核验
 
-从 GitHub Release 下载全部四个文件，在 Linux 上复算摘要：
+从 GitHub Release 下载全部八个文件，在 Linux 上复算摘要：
 
 ```bash
 sha256sum -c SHA256SUMS

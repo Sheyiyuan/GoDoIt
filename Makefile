@@ -65,7 +65,7 @@ WINDOWS_PROJECT := $(WINDOWS_RELEASE_ROOT)/project
 
 .NOTPARALLEL: all build check package-linux package-macos package-windows
 
-.PHONY: all build build-cli build-gui run run-cli frontend-check frontend-build test test-race fmt fmt-check vet check png appicon appicon-check legal legal-check release-validate package-linux package-macos package-windows release-checksums release-verify clean help
+.PHONY: all build build-cli build-gui run run-cli frontend-check frontend-build test test-race fmt fmt-check vet check png appicon appicon-check legal legal-check release-validate package-linux package-macos package-windows package-installers package-linux-installers package-macos-dmg package-windows-installer release-checksums release-verify clean help
 
 all: check build
 
@@ -183,6 +183,21 @@ package-windows: release-validate frontend-build
 	$(RELEASE_TOOL) verify-binaries --cli $(WINDOWS_RELEASE_ROOT)/bin/gdit.exe --gui $(WINDOWS_PROJECT)/gui/build/bin/gdit-gui.exe --version $(RELEASE_VERSION) --commit $(RELEASE_COMMIT) --build-date $(RELEASE_BUILD_DATE)
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(RELEASE_TOOL) package --root . --platform windows_amd64 --version $(RELEASE_VERSION) --cli $(WINDOWS_RELEASE_ROOT)/bin/gdit.exe --gui $(WINDOWS_PROJECT)/gui/build/bin/gdit-gui.exe --output $(DIST_DIR)/GoDoIt_$(RELEASE_VERSION)_windows_amd64.zip
 
+package-installers:
+	@test -x scripts/package-linux-installers.sh && test -x scripts/package-macos-dmg.sh
+	@test -f dist/GoDoIt_$(RELEASE_VERSION)_linux_amd64.tar.gz
+	@test -f dist/GoDoIt_$(RELEASE_VERSION)_darwin_arm64.zip
+	@test -f dist/GoDoIt_$(RELEASE_VERSION)_windows_amd64.zip
+
+package-linux-installers:
+	scripts/package-linux-installers.sh $(RELEASE_VERSION) $(LINUX_RELEASE_ROOT) $(DIST_DIR)
+
+package-macos-dmg:
+	scripts/package-macos-dmg.sh $(RELEASE_VERSION) $(DARWIN_PROJECT)/gui/build/bin/GoDoIt.app $(DIST_DIR)
+
+package-windows-installer:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-installer.ps1 -Version $(RELEASE_VERSION) -Root $(WINDOWS_RELEASE_ROOT) -Output $(DIST_DIR)
+
 release-checksums:
 	$(RELEASE_TOOL) checksums --dir $(DIST_DIR) --version $(RELEASE_VERSION)
 
@@ -218,7 +233,10 @@ help:
 		'package-linux   原生构建 Linux amd64 发布归档' \
 		'package-macos   原生构建 macOS arm64 发布归档并 ad-hoc 签名' \
 		'package-windows 原生构建 Windows amd64 发布归档' \
-		'release-checksums  为 dist 中三个归档生成 SHA256SUMS' \
+		'package-linux-installers  生成 Linux deb/rpm 安装包' \
+		'package-macos-dmg  生成 macOS dmg 磁盘映像' \
+		'package-windows-installer  生成可选安装目录并创建快捷方式的 Windows 安装程序' \
+		'release-checksums  为平台归档和安装包生成 SHA256SUMS' \
 		'release-verify     校验最终发布目录白名单、摘要和包内容' \
 		'all        检查后构建 CLI 与 GUI' \
 		'clean      删除构建产物'

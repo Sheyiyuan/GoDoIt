@@ -2335,12 +2335,16 @@ Release。最终目录只允许以下文件，缺少、重复或多出任一文�
 GoDoIt_<version>_linux_amd64.tar.gz
 GoDoIt_<version>_darwin_arm64.zip
 GoDoIt_<version>_windows_amd64.zip
+GoDoIt_<version>_linux_amd64.deb
+GoDoIt_<version>_linux_amd64.rpm
+GoDoIt_<version>_darwin_arm64.dmg
+GoDoIt_<version>_windows_amd64_setup.exe
 SHA256SUMS
 ```
 
 每个平台归档同时包含 `gdit` CLI、GoDoIt GUI、`LICENSE` 与 `THIRD_PARTY_NOTICES.txt`；Windows
 可执行文件保留 `.exe`，macOS GUI 保留完整 `.app` bundle。归档不得包含绝对工作区路径、GitHub
-凭据、签名材料、测试 fixture 或其他平台产物。`SHA256SUMS` 只覆盖三个平台归档，使用确定性排序与
+凭据、签名材料、测试 fixture 或其他平台产物。`SHA256SUMS` 覆盖三个平台归档和四个安装包，使用确定性排序与
 GNU sha256sum 兼容格式。中间 artifacts 仅用于同一次 workflow 的 job 传递，不直接作为 Release
 资产；最终 GitHub Release 只上传上述白名单文件。
 
@@ -2501,5 +2505,9 @@ current、edition、SDK 和引用状态。
     （建议：接受。）
 29. Windows 的 current 改用普通重定向文件（内容为规范相对路径）替代 symlink，零特权；
     Unix 保持 symlink；读写由平台能力封装，core 契约一致。（建议：接受。）
+
+2026-08-27 发布安装包扩展决策：
+
+30. 每次发布除平台压缩归档外，额外生成 Windows NSIS 安装程序（允许选择安装目录并创建桌面/开始菜单快捷方式）、Linux amd64 `.deb` 与 `.rpm`、macOS Apple Silicon `.dmg`。安装包与归档共用同一版本、构建提交和法律文本，并统一纳入 `SHA256SUMS` 与发布目录校验。
 
 框架完成后仍按项目约定先展示、review，得到用户明确的“可以”以后才能 commit。

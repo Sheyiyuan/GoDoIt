@@ -32,6 +32,14 @@ func TestPackageAndVerifyFinalRelease(t *testing.T) {
 	writeFixtureFile(t, app, "Contents/Resources/legal/LICENSE", "AGPL fixture\n", 0o644)
 	writeFixtureFile(t, app, "Contents/Resources/legal/THIRD_PARTY_NOTICES.txt", "notices fixture\n", 0o644)
 	packageFixture(t, PackageOptions{Root: root, Platform: PlatformDarwinARM64, Version: version, CLI: macCLI, GUI: app, License: license, Notices: notices, Output: filepath.Join(dist, mustArchiveName(t, version, PlatformDarwinARM64)), SourceDate: timestamp})
+	for _, name := range []string{
+		"GoDoIt_" + version + "_linux_amd64.deb",
+		"GoDoIt_" + version + "_linux_amd64.rpm",
+		"GoDoIt_" + version + "_windows_amd64_setup.exe",
+		"GoDoIt_" + version + "_darwin_arm64.dmg",
+	} {
+		writeFixtureFile(t, dist, name, "installer", 0o644)
+	}
 
 	if err := WriteChecksums(dist, version); err != nil {
 		t.Fatal(err)
