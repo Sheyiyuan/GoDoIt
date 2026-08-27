@@ -51,4 +51,13 @@ func TestGeneratedWailsAndWindowsVersions(t *testing.T) {
 	if !json.Valid(resource) {
 		t.Fatalf("Windows resource 不是有效 JSON：%s", resource)
 	}
+	var versionInfo struct {
+		Info map[string]map[string]string `json:"info"`
+	}
+	if err := json.Unmarshal(resource, &versionInfo); err != nil {
+		t.Fatal(err)
+	}
+	if got := versionInfo.Info[windowsVersionLanguageID]["ProductVersion"]; got != version {
+		t.Fatalf("Windows resource 未写入 en-US ProductVersion：%q", got)
+	}
 }

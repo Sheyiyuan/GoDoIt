@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const windowsVersionLanguageID = "0409"
+
 // StageGUIProject 创建隔离的 Wails 发布工程并注入平台元数据。
 func StageGUIProject(root, output, version string) error {
 	if err := ValidateReleaseVersion(version); err != nil {
@@ -153,7 +155,7 @@ func writeWindowsResources(guiRoot, baseVersion, displayVersion string) error {
 			"product_version": baseVersion + ".0",
 		},
 		"info": map[string]map[string]string{
-			"0000": {
+			windowsVersionLanguageID: {
 				"ProductVersion":  displayVersion,
 				"CompanyName":     "Sheyiyuan",
 				"FileDescription": "GoDoIt",
