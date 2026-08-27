@@ -57,7 +57,11 @@ func TestGeneratedWailsAndWindowsVersions(t *testing.T) {
 	if err := json.Unmarshal(resource, &versionInfo); err != nil {
 		t.Fatal(err)
 	}
-	if got := versionInfo.Info[windowsVersionLanguageID]["ProductVersion"]; got != version {
+	strings := versionInfo.Info[windowsVersionLanguageID]
+	if got := strings["ProductVersion"]; got != version {
 		t.Fatalf("Windows resource 未写入 en-US ProductVersion：%q", got)
+	}
+	if got := strings["FileVersion"]; got != version {
+		t.Fatalf("Windows resource 未写入 en-US FileVersion：%q", got)
 	}
 }

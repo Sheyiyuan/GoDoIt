@@ -159,6 +159,7 @@ func writeWindowsResources(guiRoot, baseVersion, displayVersion string) error {
 				"ProductVersion":  displayVersion,
 				"CompanyName":     "Sheyiyuan",
 				"FileDescription": "GoDoIt",
+				"FileVersion":     displayVersion,
 				"LegalCopyright":  "Copyright 2026 Sheyiyuan",
 				"ProductName":     "GoDoIt",
 				"Comments":        "Godot engine launcher and version manager",
