@@ -364,7 +364,7 @@ jobs:
             try {
               await github.rest.git.deleteRef({ owner, repo, ref: 'tags/dev-latest' });
             } catch (error) {
-              if (error.status !== 404) throw error;
+              if (error.status !== 404 && error.status !== 422) throw error;
             }
 
       - name: Publish stable Release
